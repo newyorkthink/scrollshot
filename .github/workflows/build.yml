@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  issue_comment:
+    types:
+      - created
   workflow_dispatch:
 
 permissions:
@@ -19,12 +22,25 @@ env:
 
 jobs:
   build-x86_64:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.number == 1 &&
+       github.event.comment.user.login == github.repository_owner &&
+       startsWith(github.event.comment.body, '/build '))
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
     steps:
-      - name: Checkout repository
+      - name: Checkout main branch
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Resolve source commit
+        id: source
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Install system build dependencies
         run: |
@@ -144,6 +160,7 @@ jobs:
       - name: Publish rolling GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           set -euo pipefail
 
@@ -151,7 +168,7 @@ jobs:
             gh api \
               --method PATCH \
               "repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG}" \
-              -f sha="${GITHUB_SHA}" \
+              -f sha="${SOURCE_SHA}" \
               -F force=true
 
             gh release upload "${RELEASE_TAG}" \
@@ -162,7 +179,7 @@ jobs:
             gh release create "${RELEASE_TAG}" \
               "dist/${APPIMAGE_NAME}" \
               "dist/${APPIMAGE_NAME}.sha256" \
-              --target "${GITHUB_SHA}" \
+              --target "${SOURCE_SHA}" \
               --title "ScrollShot Continuous" \
               --notes "Automatically built and tested AppImage from the latest main branch commit." \
               --latest
