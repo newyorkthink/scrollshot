@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=ScrollShot
+Name[zh_CN]=滚动截图
+Comment=Automatic scrolling screenshot tool for Linux X11
+Comment[zh_CN]=Linux X11 自动滚动截图工具
+Exec=scrollshot
+Icon=scrollshot
+Terminal=false
+Categories=Graphics;Utility;
+Keywords=screenshot;scrolling;capture;X11;
+StartupNotify=false

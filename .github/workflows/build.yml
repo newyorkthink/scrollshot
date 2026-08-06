@@ -1,4 +1,4 @@
-name: Build Linux executable
+name: Build ScrollShot AppImage
 
 on:
   workflow_dispatch:
@@ -7,8 +7,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: scrollshot-build
+  group: scrollshot-appimage-build
   cancel-in-progress: false
+
+env:
+  APPIMAGE_NAME: ScrollShot-x86_64.AppImage
 
 jobs:
   build-x86_64:
@@ -22,7 +25,13 @@ jobs:
       - name: Install system build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk python3-venv xvfb
+          sudo apt-get install -y \
+            curl \
+            desktop-file-utils \
+            file \
+            python3-tk \
+            python3-venv \
+            xvfb
 
       - name: Create isolated build environment
         run: |
@@ -34,28 +43,69 @@ jobs:
         run: |
           .venv/bin/python -m unittest discover -s tests -v
 
-      - name: Build standalone executable
+      - name: Build bundled application directory
         run: |
           .venv/bin/pyinstaller \
             --clean \
             --noconfirm \
-            --onefile \
+            --onedir \
             --name scrollshot \
             --hidden-import tkinter \
             --hidden-import Xlib.ext.xtest \
             src/scrollshot.py
-          chmod +x dist/scrollshot
+          test -x dist/scrollshot/scrollshot
 
-      - name: Test executable in X11 virtual display
+      - name: Assemble AppDir
         run: |
-          dist/scrollshot --version
+          rm -rf ScrollShot.AppDir
+          install -d \
+            ScrollShot.AppDir/usr/lib \
+            ScrollShot.AppDir/usr/share/applications \
+            ScrollShot.AppDir/usr/share/icons/hicolor/scalable/apps
+          cp -a dist/scrollshot ScrollShot.AppDir/usr/lib/scrollshot
+          install -m 0755 packaging/AppRun ScrollShot.AppDir/AppRun
+          install -m 0644 \
+            packaging/scrollshot.desktop \
+            ScrollShot.AppDir/usr/share/applications/scrollshot.desktop
+          install -m 0644 \
+            assets/scrollshot.svg \
+            ScrollShot.AppDir/usr/share/icons/hicolor/scalable/apps/scrollshot.svg
+          ln -s usr/share/applications/scrollshot.desktop ScrollShot.AppDir/scrollshot.desktop
+          ln -s usr/share/icons/hicolor/scalable/apps/scrollshot.svg ScrollShot.AppDir/scrollshot.svg
+          ln -s scrollshot.svg ScrollShot.AppDir/.DirIcon
+          desktop-file-validate ScrollShot.AppDir/scrollshot.desktop
+          test -x ScrollShot.AppDir/AppRun
+          test -x ScrollShot.AppDir/usr/lib/scrollshot/scrollshot
+
+      - name: Build AppImage
+        run: |
+          curl \
+            --proto '=https' \
+            --tlsv1.2 \
+            --fail \
+            --location \
+            --retry 3 \
+            --output appimagetool-x86_64.AppImage \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 \
+            ./appimagetool-x86_64.AppImage \
+            ScrollShot.AppDir \
+            "dist/${APPIMAGE_NAME}"
+          chmod +x "dist/${APPIMAGE_NAME}"
+
+      - name: Test AppImage in X11 virtual display
+        run: |
+          APPIMAGE_EXTRACT_AND_RUN=1 "dist/${APPIMAGE_NAME}" --version
+          file "dist/${APPIMAGE_NAME}" | grep -F 'ELF 64-bit'
+          rm -f /tmp/scrollshot-ci.png
           xvfb-run -a -s "-screen 0 800x600x24" bash -c '
-            set -e
+            set -euo pipefail
             .venv/bin/python tests/x11_demo.py &
             demo_pid=$!
             trap "kill ${demo_pid} 2>/dev/null || true" EXIT
             sleep 1
-            dist/scrollshot \
+            APPIMAGE_EXTRACT_AND_RUN=1 dist/ScrollShot-x86_64.AppImage \
               --geometry 0,0,400,400 \
               --scroll-ticks 6 \
               --delay 0.55 \
@@ -74,14 +124,15 @@ jobs:
 
       - name: Generate checksum
         run: |
-          sha256sum dist/scrollshot > dist/scrollshot-x86_64.sha256
+          cd dist
+          sha256sum "${APPIMAGE_NAME}" > "${APPIMAGE_NAME}.sha256"
 
-      - name: Upload build artifact
+      - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: scrollshot-x86_64
+          name: ScrollShot-x86_64-AppImage
           path: |
-            dist/scrollshot
-            dist/scrollshot-x86_64.sha256
+            dist/ScrollShot-x86_64.AppImage
+            dist/ScrollShot-x86_64.AppImage.sha256
           if-no-files-found: error
           retention-days: 14

@@ -1,8 +1,8 @@
 # ScrollShot
 
-ScrollShot 是面向 **Linux X11** 的滚动截图工具，适用于 Kali Linux、i3wm、浏览器和普通可滚动窗口。
+ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，适用于 Kali Linux、i3wm、浏览器和普通可滚动窗口。
 
-程序执行后拖动鼠标框选区域，ScrollShot 会将鼠标移动到区域中心，自动向下滚动，检测相邻画面的重叠部分，并将新出现的内容拼接为一张 PNG。
+程序启动后拖动鼠标框选区域，ScrollShot 会将鼠标移动到区域中心，自动向下滚动，检测相邻画面的重叠部分，并将新出现的内容拼接为一张 PNG。
 
 ## 主要功能
 
@@ -17,37 +17,27 @@ ScrollShot 是面向 **Linux X11** 的滚动截图工具，适用于 Kali Linux�
 
 ## 运行环境
 
-- Kali Linux 或其他带 X11 的 Linux 发行版
+- Kali Linux 或其他带 X11 的 x86_64 Linux 发行版
 - i3wm、Xfce、KDE X11 等桌面环境
 - 不支持原生 Wayland 会话
 
-## Kali Linux 安装
+## 获取 AppImage
 
-在 **Kali Linux 终端**执行：
+进入仓库的 **Actions** 页面，手动运行 `Build ScrollShot AppImage`，完成后下载 `ScrollShot-x86_64-AppImage` Artifact。压缩包内包含：
 
-```bash
-# 克隆 ScrollShot 仓库
-git clone https://github.com/newyorkthink/scrollshot.git
-
-# 进入 ScrollShot 仓库目录
-cd scrollshot
-
-# 安装 Kali Linux 依赖并将程序安装到 ~/.local/bin/scrollshot
-./install.sh
-
-# 检查 ScrollShot 是否安装完成
-~/.local/bin/scrollshot --version
-```
-
-`install.sh` 只安装运行依赖并复制主程序，不会删除用户文件。若终端无法直接识别 `scrollshot`，需要确认 `~/.local/bin` 已加入 `PATH`。
+- `ScrollShot-x86_64.AppImage`
+- `ScrollShot-x86_64.AppImage.sha256`
 
 ## 基本使用
 
 在 **Kali Linux 的 X11 图形终端**执行：
 
 ```bash
+# 为 ScrollShot AppImage 添加执行权限
+chmod +x ScrollShot-x86_64.AppImage
+
 # 启动框选并自动完成滚动截图
-scrollshot
+./ScrollShot-x86_64.AppImage
 ```
 
 操作顺序：
@@ -65,63 +55,62 @@ scrollshot
 
 ```bash
 # 指定输出文件；文件已存在时会自动生成带序号的新文件名
-scrollshot --output ~/Pictures/web-page.png
+./ScrollShot-x86_64.AppImage --output ~/Pictures/web-page.png
 ```
 
 ```bash
 # 使用固定截图区域，跳过鼠标框选
-scrollshot --geometry 100,120,1200,800
+./ScrollShot-x86_64.AppImage --geometry 100,120,1200,800
 ```
 
 ```bash
 # 页面滚动动画较慢时增加每轮等待时间
-scrollshot --delay 0.8
+./ScrollShot-x86_64.AppImage --delay 0.8
 ```
 
 ```bash
 # 单次滚动距离过大时减少每轮滚轮次数
-scrollshot --scroll-ticks 4
+./ScrollShot-x86_64.AppImage --scroll-ticks 4
 ```
 
 ```bash
 # 保存每一张原始帧，用于排查特殊网页的匹配问题
-scrollshot --debug-dir ~/Pictures/scrollshot-debug
+./ScrollShot-x86_64.AppImage --debug-dir ~/Pictures/scrollshot-debug
 ```
-
-查看完整参数：
 
 ```bash
 # 显示 ScrollShot 的完整命令行帮助
-scrollshot --help
+./ScrollShot-x86_64.AppImage --help
 ```
 
 ## Kando 与 i3wm
 
-Kando 的“运行命令”动作可直接使用：
+Kando 的“运行命令”动作可以直接填写 AppImage 的绝对路径，例如：
 
 ```text
-scrollshot
+/home/user/Applications/ScrollShot-x86_64.AppImage
 ```
 
-固定区域也可使用：
+固定区域示例：
 
 ```text
-scrollshot --geometry 100,120,1200,800
+/home/user/Applications/ScrollShot-x86_64.AppImage --geometry 100,120,1200,800
 ```
 
-在 i3 配置中绑定快捷键时，执行的同样是 `scrollshot` 命令。
+请将 `/home/user/Applications/` 替换为 AppImage 的实际保存目录。
 
 ## GitHub Actions 构建
 
-仓库中的 `Build Linux executable` 工作流只支持手动触发，不会因普通提交自动运行，避免无效消耗 Actions 时间。
+`Build ScrollShot AppImage` 工作流只支持手动触发，普通提交不会自动构建，避免无效消耗 Actions 时间。
 
-手动运行后会执行：
+手动运行后会依次执行：
 
-1. 安装隔离构建环境。
-2. 运行拼接算法单元测试。
-3. 使用 PyInstaller 构建 `scrollshot` x86_64 单文件程序。
-4. 在 Xvfb 虚拟 X11 环境中完成实际截图检查。
-5. 上传程序和 SHA-256 校验文件，Artifact 保留 14 天。
+1. 运行拼接算法单元测试。
+2. 使用 PyInstaller 构建完整程序目录。
+3. 按 AppDir 规范写入 `AppRun`、桌面文件和图标。
+4. 使用官方 `appimagetool` 生成 `ScrollShot-x86_64.AppImage`。
+5. 在 Xvfb 虚拟 X11 环境中运行 AppImage，实际检查自动滚动和多帧拼接。
+6. 上传 AppImage 和 SHA-256 校验文件，Artifact 保留 14 天。
 
 ## 工作原理
 
@@ -135,7 +124,7 @@ scrollshot --geometry 100,120,1200,800
 - 固定在页面底部的悬浮工具栏可能被重复带入拼接图，建议框选时避开该区域。
 - 浏览器启用平滑滚动且动画时间较长时，可增加 `--delay`。
 
-## 开发检查
+## 源码检查
 
 在已经安装 NumPy 和 OpenCV 的开发环境中执行：
 
