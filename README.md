@@ -1,6 +1,6 @@
 # ScrollShot
 
-ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，适用于 Kali Linux、i3wm、浏览器和普通可滚动窗口。
+ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器和普通可滚动窗口进行自动滚动、重叠检测与 PNG 拼接。
 
 程序启动后拖动鼠标框选区域，ScrollShot 会将鼠标移动到区域中心，自动向下滚动，检测相邻画面的重叠部分，并将新出现的内容拼接为一张 PNG。
 
@@ -12,13 +12,13 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，适用于 Kali Lin
 - 自动识别页面底部
 - 匹配失败时停止继续滚动，保留此前已确认的结果
 - 输出文件自动避让同名文件，不覆盖已有截图
-- 支持固定坐标区域，便于接入 Kando、i3 快捷键或脚本
+- 支持固定坐标区域，便于接入快捷键或其他启动器
 - `Ctrl+C` 可提前停止并保存当前已完成的拼接结果
 
 ## 运行环境
 
-- Kali Linux 或其他带 X11 的 x86_64 Linux 发行版
-- i3wm、Xfce、KDE X11 等桌面环境
+- x86_64 Linux
+- X11 图形会话
 - 不支持原生 Wayland 会话
 
 ## 获取 AppImage
@@ -32,7 +32,7 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，适用于 Kali Lin
 
 ## 基本使用
 
-在 **Kali Linux 的 X11 图形终端**执行：
+在 **Linux X11 图形终端**执行：
 
 ```bash
 # 为 ScrollShot AppImage 添加执行权限
@@ -53,11 +53,11 @@ chmod +x scrollshot.AppImage
 
 ## 常用参数
 
-在 **Kali Linux 终端**执行：
+在 **Linux X11 图形终端**执行：
 
 ```bash
 # 指定输出文件；文件已存在时会自动生成带序号的新文件名
-./scrollshot.AppImage --output ~/Pictures/web-page.png
+./scrollshot.AppImage --output ./web-page.png
 ```
 
 ```bash
@@ -77,29 +77,13 @@ chmod +x scrollshot.AppImage
 
 ```bash
 # 保存每一张原始帧，用于排查特殊网页的匹配问题
-./scrollshot.AppImage --debug-dir ~/Pictures/scrollshot-debug
+./scrollshot.AppImage --debug-dir ./scrollshot-debug
 ```
 
 ```bash
 # 显示 ScrollShot 的完整命令行帮助
 ./scrollshot.AppImage --help
 ```
-
-## Kando 与 i3wm
-
-Kando 的“运行命令”动作可以直接填写 AppImage 的绝对路径，例如：
-
-```text
-/home/user/Applications/scrollshot.AppImage
-```
-
-固定区域示例：
-
-```text
-/home/user/Applications/scrollshot.AppImage --geometry 100,120,1200,800
-```
-
-请将 `/home/user/Applications/` 替换为 AppImage 的实际保存目录。
 
 ## GitHub Actions 构建
 

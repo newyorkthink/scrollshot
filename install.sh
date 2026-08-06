@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="${HOME}/.local/bin"
 TARGET="${INSTALL_DIR}/scrollshot"
 
-# 安装 ScrollShot 在 Kali Linux 下运行所需的 Python 与 X11 依赖
+# 使用 apt 安装源码运行所需的 Python 与 X11 依赖
 sudo apt-get install -y python3 python3-numpy python3-opencv python3-xlib python3-tk
 
 # 创建当前用户的本地可执行文件目录
