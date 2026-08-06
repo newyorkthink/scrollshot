@@ -25,8 +25,8 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，适用于 Kali Lin
 
 进入仓库的 [Releases](https://github.com/newyorkthink/scrollshot/releases/latest) 页面，直接下载：
 
-- [scrollshot.AppImage](https://github.com/newyorkthink/scrollshot/releases/download/continuous/ScrollShot-x86_64.AppImage)
-- [ScrollShot-x86_64.AppImage.sha256](https://github.com/newyorkthink/scrollshot/releases/download/continuous/ScrollShot-x86_64.AppImage.sha256)
+- [scrollshot.AppImage](https://github.com/newyorkthink/scrollshot/releases/download/continuous/scrollshot.AppImage)
+- [scrollshot.AppImage.sha256](https://github.com/newyorkthink/scrollshot/releases/download/continuous/scrollshot.AppImage.sha256)
 
 每次 `main` 分支提交通过完整测试后，`continuous` Release 中的同名 AppImage 和校验文件都会自动覆盖更新，固定下载链接保持不变。
 
@@ -36,10 +36,10 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，适用于 Kali Lin
 
 ```bash
 # 为 ScrollShot AppImage 添加执行权限
-chmod +x ScrollShot-x86_64.AppImage
+chmod +x scrollshot.AppImage
 
 # 启动框选并自动完成滚动截图
-./ScrollShot-x86_64.AppImage
+./scrollshot.AppImage
 ```
 
 操作顺序：
@@ -57,32 +57,32 @@ chmod +x ScrollShot-x86_64.AppImage
 
 ```bash
 # 指定输出文件；文件已存在时会自动生成带序号的新文件名
-./ScrollShot-x86_64.AppImage --output ~/Pictures/web-page.png
+./scrollshot.AppImage --output ~/Pictures/web-page.png
 ```
 
 ```bash
 # 使用固定截图区域，跳过鼠标框选
-./ScrollShot-x86_64.AppImage --geometry 100,120,1200,800
+./scrollshot.AppImage --geometry 100,120,1200,800
 ```
 
 ```bash
 # 页面滚动动画较慢时增加每轮等待时间
-./ScrollShot-x86_64.AppImage --delay 0.8
+./scrollshot.AppImage --delay 0.8
 ```
 
 ```bash
 # 单次滚动距离过大时减少每轮滚轮次数
-./ScrollShot-x86_64.AppImage --scroll-ticks 4
+./scrollshot.AppImage --scroll-ticks 4
 ```
 
 ```bash
 # 保存每一张原始帧，用于排查特殊网页的匹配问题
-./ScrollShot-x86_64.AppImage --debug-dir ~/Pictures/scrollshot-debug
+./scrollshot.AppImage --debug-dir ~/Pictures/scrollshot-debug
 ```
 
 ```bash
 # 显示 ScrollShot 的完整命令行帮助
-./ScrollShot-x86_64.AppImage --help
+./scrollshot.AppImage --help
 ```
 
 ## Kando 与 i3wm
@@ -90,13 +90,13 @@ chmod +x ScrollShot-x86_64.AppImage
 Kando 的“运行命令”动作可以直接填写 AppImage 的绝对路径，例如：
 
 ```text
-/home/user/Applications/ScrollShot-x86_64.AppImage
+/home/user/Applications/scrollshot.AppImage
 ```
 
 固定区域示例：
 
 ```text
-/home/user/Applications/ScrollShot-x86_64.AppImage --geometry 100,120,1200,800
+/home/user/Applications/scrollshot.AppImage --geometry 100,120,1200,800
 ```
 
 请将 `/home/user/Applications/` 替换为 AppImage 的实际保存目录。
@@ -110,7 +110,7 @@ Kando 的“运行命令”动作可以直接填写 AppImage 的绝对路径，�
 1. 运行拼接算法单元测试。
 2. 使用 PyInstaller 构建完整程序目录。
 3. 按 AppDir 规范写入 `AppRun`、桌面文件和图标。
-4. 使用官方 `appimagetool` 生成 `ScrollShot-x86_64.AppImage`。
+4. 使用官方 `appimagetool` 生成 `scrollshot.AppImage`。
 5. 在 Xvfb 虚拟 X11 环境中运行 AppImage，实际检查自动滚动和多帧拼接。
 6. 上传 AppImage 和 SHA-256 校验文件，Artifact 保留 14 天。
 7. 创建或更新 `continuous` GitHub Release，并覆盖同名 Release Assets。
