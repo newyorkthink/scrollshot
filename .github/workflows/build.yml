@@ -1,17 +1,28 @@
 name: Build ScrollShot AppImage
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build.yml
+      - assets/**
+      - packaging/**
+      - src/**
+      - tests/**
+      - requirements-build.txt
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: scrollshot-appimage-build
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   APPIMAGE_NAME: ScrollShot-x86_64.AppImage
+  RELEASE_TAG: continuous
 
 jobs:
   build-x86_64:
@@ -136,3 +147,30 @@ jobs:
             dist/ScrollShot-x86_64.AppImage.sha256
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish rolling GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh api \
+              --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG}" \
+              -f sha="${GITHUB_SHA}" \
+              -F force=true
+
+            gh release upload "${RELEASE_TAG}" \
+              "dist/${APPIMAGE_NAME}" \
+              "dist/${APPIMAGE_NAME}.sha256" \
+              --clobber
+          else
+            gh release create "${RELEASE_TAG}" \
+              "dist/${APPIMAGE_NAME}" \
+              "dist/${APPIMAGE_NAME}.sha256" \
+              --target "${GITHUB_SHA}" \
+              --title "ScrollShot Continuous" \
+              --notes "Automatically built and tested AppImage from the latest main branch commit." \
+              --latest
+          fi

@@ -23,10 +23,12 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，适用于 Kali Lin
 
 ## 获取 AppImage
 
-进入仓库的 **Actions** 页面，手动运行 `Build ScrollShot AppImage`，完成后下载 `ScrollShot-x86_64-AppImage` Artifact。压缩包内包含：
+进入仓库的 [Releases](https://github.com/newyorkthink/scrollshot/releases/latest) 页面，直接下载：
 
 - `ScrollShot-x86_64.AppImage`
 - `ScrollShot-x86_64.AppImage.sha256`
+
+`continuous` Release 始终指向 `main` 分支最近一次通过完整测试的 AppImage。
 
 ## 基本使用
 
@@ -101,9 +103,9 @@ Kando 的“运行命令”动作可以直接填写 AppImage 的绝对路径，�
 
 ## GitHub Actions 构建
 
-`Build ScrollShot AppImage` 工作流只支持手动触发，普通提交不会自动构建，避免无效消耗 Actions 时间。
+`Build ScrollShot AppImage` 工作流在影响程序构建的文件推送到 `main` 后自动运行，也保留手动触发入口。仅修改无关文件不会触发构建。
 
-手动运行后会依次执行：
+工作流会依次执行：
 
 1. 运行拼接算法单元测试。
 2. 使用 PyInstaller 构建完整程序目录。
@@ -111,6 +113,7 @@ Kando 的“运行命令”动作可以直接填写 AppImage 的绝对路径，�
 4. 使用官方 `appimagetool` 生成 `ScrollShot-x86_64.AppImage`。
 5. 在 Xvfb 虚拟 X11 环境中运行 AppImage，实际检查自动滚动和多帧拼接。
 6. 上传 AppImage 和 SHA-256 校验文件，Artifact 保留 14 天。
+7. 创建或更新 `continuous` GitHub Release，并将 AppImage 与校验文件作为 Release Assets 发布。
 
 ## 工作原理
 
