@@ -25,7 +25,7 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，适用于 Kali Lin
 
 进入仓库的 [Releases](https://github.com/newyorkthink/scrollshot/releases/latest) 页面，直接下载：
 
-- [scrollShot.AppImage](https://github.com/newyorkthink/scrollshot/releases/download/continuous/ScrollShot-x86_64.AppImage)
+- [scrollshot.AppImage](https://github.com/newyorkthink/scrollshot/releases/download/continuous/ScrollShot-x86_64.AppImage)
 - `ScrollShot-x86_64.AppImage.sha256`
 
 `continuous` Release 始终指向 `main` 分支最近一次通过完整测试的 AppImage。
