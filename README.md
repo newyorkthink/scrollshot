@@ -26,9 +26,9 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，适用于 Kali Lin
 进入仓库的 [Releases](https://github.com/newyorkthink/scrollshot/releases/latest) 页面，直接下载：
 
 - [scrollshot.AppImage](https://github.com/newyorkthink/scrollshot/releases/download/continuous/ScrollShot-x86_64.AppImage)
-- `ScrollShot-x86_64.AppImage.sha256`
+- [ScrollShot-x86_64.AppImage.sha256](https://github.com/newyorkthink/scrollshot/releases/download/continuous/ScrollShot-x86_64.AppImage.sha256)
 
-`continuous` Release 始终指向 `main` 分支最近一次通过完整测试的 AppImage。
+每次 `main` 分支提交通过完整测试后，`continuous` Release 中的同名 AppImage 和校验文件都会自动覆盖更新，固定下载链接保持不变。
 
 ## 基本使用
 
@@ -103,7 +103,7 @@ Kando 的“运行命令”动作可以直接填写 AppImage 的绝对路径，�
 
 ## GitHub Actions 构建
 
-`Build ScrollShot AppImage` 工作流在影响程序构建的文件推送到 `main` 后自动运行，也保留手动触发入口。仅修改无关文件不会触发构建。
+`Build ScrollShot AppImage` 工作流会在 `main` 分支每次产生新提交后自动运行。无论修改程序、工作流、README，还是只改一个字，都会触发一次完整构建；同时保留手动触发入口。
 
 工作流会依次执行：
 
@@ -113,7 +113,7 @@ Kando 的“运行命令”动作可以直接填写 AppImage 的绝对路径，�
 4. 使用官方 `appimagetool` 生成 `ScrollShot-x86_64.AppImage`。
 5. 在 Xvfb 虚拟 X11 环境中运行 AppImage，实际检查自动滚动和多帧拼接。
 6. 上传 AppImage 和 SHA-256 校验文件，Artifact 保留 14 天。
-7. 创建或更新 `continuous` GitHub Release，并将 AppImage 与校验文件作为 Release Assets 发布。
+7. 创建或更新 `continuous` GitHub Release，并覆盖同名 Release Assets。
 
 ## 工作原理
 
