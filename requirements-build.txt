@@ -1,0 +1,4 @@
+numpy<3
+opencv-python-headless==5.0.0.93
+python-xlib==0.33
+pyinstaller==6.21.0

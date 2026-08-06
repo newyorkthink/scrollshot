@@ -1,0 +1,73 @@
+name: Build Linux executable
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scrollshot-build
+  cancel-in-progress: false
+
+jobs:
+  build-x86_64:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk python3-venv xvfb
+
+      - name: Create isolated build environment
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements-build.txt
+
+      - name: Run unit tests
+        run: |
+          .venv/bin/python -m unittest discover -s tests -v
+
+      - name: Build standalone executable
+        run: |
+          .venv/bin/pyinstaller \
+            --clean \
+            --noconfirm \
+            --onefile \
+            --name scrollshot \
+            --hidden-import tkinter \
+            --hidden-import Xlib.ext.xtest \
+            src/scrollshot.py
+          chmod +x dist/scrollshot
+
+      - name: Test executable in X11 virtual display
+        run: |
+          dist/scrollshot --version
+          xvfb-run -a dist/scrollshot \
+            --geometry 0,0,320,240 \
+            --max-frames 2 \
+            --stable-rounds 1 \
+            --settle-delay 0.1 \
+            --delay 0.1 \
+            --output /tmp/scrollshot-ci.png
+          test -s /tmp/scrollshot-ci.png
+
+      - name: Generate checksum
+        run: |
+          sha256sum dist/scrollshot > dist/scrollshot-x86_64.sha256
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrollshot-x86_64
+          path: |
+            dist/scrollshot
+            dist/scrollshot-x86_64.sha256
+          if-no-files-found: error
+          retention-days: 14
