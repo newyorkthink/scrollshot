@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APPIMAGE_NAME: ScrollShot-x86_64.AppImage
+  APPIMAGE_NAME: scrollshot.AppImage
   RELEASE_TAG: continuous
 
 jobs:
@@ -109,7 +109,7 @@ jobs:
             demo_pid=$!
             trap "kill ${demo_pid} 2>/dev/null || true" EXIT
             sleep 1
-            APPIMAGE_EXTRACT_AND_RUN=1 dist/ScrollShot-x86_64.AppImage \
+            APPIMAGE_EXTRACT_AND_RUN=1 "dist/${APPIMAGE_NAME}" \
               --geometry 0,0,400,400 \
               --scroll-ticks 6 \
               --delay 0.55 \
@@ -134,10 +134,10 @@ jobs:
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ScrollShot-x86_64-AppImage
+          name: scrollshot-AppImage
           path: |
-            dist/ScrollShot-x86_64.AppImage
-            dist/ScrollShot-x86_64.AppImage.sha256
+            dist/${{ env.APPIMAGE_NAME }}
+            dist/${{ env.APPIMAGE_NAME }}.sha256
           if-no-files-found: error
           retention-days: 14
 
@@ -148,6 +148,9 @@ jobs:
           set -euo pipefail
 
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release delete-asset "${RELEASE_TAG}" "ScrollShot-x86_64.AppImage" --yes 2>/dev/null || true
+            gh release delete-asset "${RELEASE_TAG}" "ScrollShot-x86_64.AppImage.sha256" --yes 2>/dev/null || true
+
             gh release upload "${RELEASE_TAG}" \
               "dist/${APPIMAGE_NAME}" \
               "dist/${APPIMAGE_NAME}.sha256" \
