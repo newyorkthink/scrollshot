@@ -49,14 +49,28 @@ jobs:
       - name: Test executable in X11 virtual display
         run: |
           dist/scrollshot --version
-          xvfb-run -a dist/scrollshot \
-            --geometry 0,0,320,240 \
-            --max-frames 2 \
-            --stable-rounds 1 \
-            --settle-delay 0.1 \
-            --delay 0.1 \
-            --output /tmp/scrollshot-ci.png
-          test -s /tmp/scrollshot-ci.png
+          xvfb-run -a -s "-screen 0 800x600x24" bash -c '
+            set -e
+            .venv/bin/python tests/x11_demo.py &
+            demo_pid=$!
+            trap "kill ${demo_pid} 2>/dev/null || true" EXIT
+            sleep 1
+            dist/scrollshot \
+              --geometry 0,0,400,400 \
+              --scroll-ticks 6 \
+              --delay 0.55 \
+              --settle-delay 0.1 \
+              --max-frames 20 \
+              --stable-rounds 2 \
+              --output /tmp/scrollshot-ci.png
+          '
+          .venv/bin/python - <<'PY'
+          import cv2
+
+          image = cv2.imread("/tmp/scrollshot-ci.png")
+          assert image is not None
+          assert image.shape[0] > 800, image.shape
+          PY
 
       - name: Generate checksum
         run: |

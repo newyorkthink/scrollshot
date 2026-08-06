@@ -253,7 +253,7 @@ def frames_are_stable(
     current: np.ndarray,
     *,
     pixel_threshold: int = 8,
-    changed_ratio_threshold: float = 0.025,
+    changed_ratio_threshold: float = 0.005,
 ) -> bool:
     if previous.shape != current.shape:
         return False
@@ -266,6 +266,32 @@ def frames_are_stable(
         float(np.mean(difference > pixel_threshold)) <= changed_ratio_threshold
         and float(np.median(difference)) <= 1.0
     )
+
+
+def _alignment_error(previous: np.ndarray, current: np.ndarray, shift: int) -> float:
+    """使用完整重叠区域评估候选位移，避免周期性布局误匹配。"""
+
+    height, width = previous.shape
+    overlap = height - shift
+    if overlap <= 0:
+        return float("inf")
+
+    # 忽略常见的固定页头、页脚，并降采样控制计算量。
+    top = min(int(height * 0.08), max(0, overlap // 4))
+    bottom = min(int(height * 0.04), max(0, overlap // 6))
+    end = overlap - bottom
+    if end - top < 32:
+        top, end = 0, overlap
+
+    previous_overlap = previous[shift + top : shift + end]
+    current_overlap = current[top:end]
+    step_y = max(1, previous_overlap.shape[0] // 320)
+    step_x = max(1, width // 280)
+    difference = cv2.absdiff(
+        previous_overlap[::step_y, ::step_x],
+        current_overlap[::step_y, ::step_x],
+    )
+    return float(np.mean(difference))
 
 
 def estimate_vertical_shift(
@@ -284,9 +310,14 @@ def estimate_vertical_shift(
         return None
 
     margin_x = max(8, int(width * 0.08))
-    previous_gray = cv2.GaussianBlur(to_gray(previous)[:, margin_x : width - margin_x], (3, 3), 0)
-    current_gray = cv2.GaussianBlur(to_gray(current)[:, margin_x : width - margin_x], (3, 3), 0)
+    previous_gray = cv2.GaussianBlur(
+        to_gray(previous)[:, margin_x : width - margin_x], (3, 3), 0
+    )
+    current_gray = cv2.GaussianBlur(
+        to_gray(current)[:, margin_x : width - margin_x], (3, 3), 0
+    )
     template_height = min(160, max(48, height // 7))
+    peak_threshold = max(0.50, score_threshold - 0.15)
     candidates: list[tuple[int, float]] = []
 
     for ratio in (0.16, 0.32, 0.48, 0.64, 0.76):
@@ -301,29 +332,54 @@ def estimate_vertical_shift(
         search = previous_gray[search_start:search_end]
         if search.shape[0] < template_height:
             continue
-        result = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED)
-        _, score, _, location = cv2.minMaxLoc(result)
-        shift = search_start + int(location[1]) - template_y
-        if min_shift <= shift <= maximum_shift and score >= score_threshold:
-            candidates.append((shift, float(score)))
+
+        scores = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED).ravel()
+        anchor_candidates = 0
+        for index in np.argsort(scores)[::-1]:
+            score = float(scores[index])
+            if score < peak_threshold:
+                break
+            shift = search_start + int(index) - template_y
+            if not min_shift <= shift <= maximum_shift:
+                continue
+            if any(abs(shift - existing) <= 3 for existing, _ in candidates):
+                continue
+            candidates.append((shift, score))
+            anchor_candidates += 1
+            # 每个锚点保留多个峰，周期性页面仍能包含真实位移。
+            if anchor_candidates >= 6:
+                break
 
     if not candidates:
         return None
-    tolerance = max(4, int(height * 0.012))
-    clusters = [
-        [item for item in candidates if abs(item[0] - center[0]) <= tolerance]
-        for center in candidates
-    ]
-    cluster = max(clusters, key=lambda items: sum(score for _, score in items))
-    if len(cluster) == 1 and cluster[0][1] < max(0.86, score_threshold + 0.12):
-        return None
 
-    shifts = np.array([shift for shift, _ in cluster], dtype=np.float64)
-    scores = np.array([score for _, score in cluster], dtype=np.float64)
-    shift = int(round(float(np.average(shifts, weights=scores))))
-    if not min_shift <= shift <= maximum_shift:
+    tolerance = max(4, int(height * 0.012))
+    centers = sorted({shift for shift, _ in candidates})
+    clusters: list[list[tuple[int, float]]] = []
+    for center in centers:
+        cluster = [item for item in candidates if abs(item[0] - center) <= tolerance]
+        if cluster and cluster not in clusters:
+            clusters.append(cluster)
+
+    verified: list[tuple[float, int, float, int]] = []
+    for cluster in clusters:
+        shifts = np.array([shift for shift, _ in cluster], dtype=np.float64)
+        scores = np.array([score for _, score in cluster], dtype=np.float64)
+        shift = int(round(float(np.average(shifts, weights=scores))))
+        if not min_shift <= shift <= maximum_shift:
+            continue
+        average_score = float(np.mean(scores))
+        if len(cluster) == 1 and average_score < max(0.86, score_threshold + 0.12):
+            continue
+        error = _alignment_error(previous_gray, current_gray, shift)
+        verified.append((error, shift, average_score, len(cluster)))
+
+    if not verified:
         return None
-    return ShiftMatch(shift, float(np.mean(scores)), len(cluster))
+    error, shift, score, anchors = min(verified, key=lambda item: item[0])
+    if error > 32.0:
+        return None
+    return ShiftMatch(shift, score, anchors)
 
 
 def stitch_frames(frames: Sequence[np.ndarray], shifts: Sequence[int]) -> np.ndarray:

@@ -111,6 +111,45 @@ class MatchingTests(unittest.TestCase):
         animated[100:108, 100:108] = 0
         self.assertTrue(scrollshot.frames_are_stable(frame, animated))
 
+    def test_repetitive_scrolled_content_is_not_stable(self) -> None:
+        frame = np.full((400, 400, 3), 255, dtype=np.uint8)
+        for y in range(0, 400, 28):
+            cv2.putText(
+                frame,
+                f"line {y // 28:02d}",
+                (15, y + 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 0, 0),
+                1,
+                cv2.LINE_AA,
+            )
+        shifted = np.roll(frame, -84, axis=0)
+        self.assertFalse(scrollshot.frames_are_stable(frame, shifted))
+
+    def test_repetitive_layout_uses_full_overlap(self) -> None:
+        document = np.full((1800, 420, 3), 255, dtype=np.uint8)
+        for index, y in enumerate(range(0, 1800, 27)):
+            background = 255 if index % 2 == 0 else 232
+            cv2.rectangle(document, (0, y), (419, min(y + 26, 1799)), (background,) * 3, -1)
+            cv2.putText(
+                document,
+                f"ScrollShot line {index:03d}",
+                (14, y + 19),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.52,
+                (20, 20, 20),
+                1,
+                cv2.LINE_AA,
+            )
+        shift = 216
+        previous = document[:400]
+        current = document[shift : shift + 400]
+        match = scrollshot.estimate_vertical_shift(previous, current, min_overlap=80)
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertLessEqual(abs(match.shift - shift), 2)
+
     def test_stitch_frames_reconstructs_document(self) -> None:
         document = build_document(width=500, height=1300)
         viewport_height = 600
