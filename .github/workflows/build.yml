@@ -4,13 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - .github/workflows/build.yml
-      - assets/**
-      - packaging/**
-      - src/**
-      - tests/**
-      - requirements-build.txt
   workflow_dispatch:
 
 permissions:
