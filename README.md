@@ -7,6 +7,7 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器和
 ## 主要功能
 
 - 鼠标框选任意矩形区域
+- 框选时显示启动瞬间的桌面预览，不依赖窗口透明效果
 - 自动发送向下滚轮事件
 - 多锚点重叠检测，降低重复图案造成的错误拼接
 - 自动识别页面底部
@@ -44,10 +45,11 @@ chmod +x scrollshot.AppImage
 
 操作顺序：
 
-1. 拖动鼠标框选需要滚动截图的内容区域。
-2. 松开鼠标后不要操作目标窗口。
-3. 程序自动滚动、检测重叠并拼接。
-4. 检测到页面底部后，PNG 默认保存到 `~/Pictures/`。
+1. 程序先显示启动瞬间的桌面预览。
+2. 拖动鼠标框选需要滚动截图的内容区域。
+3. 松开鼠标后不要操作目标窗口。
+4. 程序自动滚动、检测重叠并拼接。
+5. 检测到页面底部后，PNG 默认保存到 `~/Pictures/`。
 
 按 `Esc` 取消框选。捕获过程中可在启动命令的终端按 `Ctrl+C`，程序会保存已经完成的部分。
 
@@ -92,12 +94,13 @@ chmod +x scrollshot.AppImage
 工作流会依次执行：
 
 1. 运行拼接算法单元测试。
-2. 使用 PyInstaller 构建完整程序目录。
-3. 按 AppDir 规范写入 `AppRun`、桌面文件和图标。
-4. 使用官方 `appimagetool` 生成 `scrollshot.AppImage`。
-5. 在 Xvfb 虚拟 X11 环境中运行 AppImage，实际检查自动滚动和多帧拼接。
-6. 上传 AppImage 和 SHA-256 校验文件，Artifact 保留 14 天。
-7. 创建或更新 `continuous` GitHub Release，并覆盖同名 Release Assets。
+2. 在 Xvfb 虚拟 X11 环境中验证桌面预览和鼠标框选。
+3. 使用 PyInstaller 构建完整程序目录。
+4. 按 AppDir 规范写入 `AppRun`、桌面文件和图标。
+5. 使用官方 `appimagetool` 生成 `scrollshot.AppImage`。
+6. 在 Xvfb 虚拟 X11 环境中运行 AppImage，实际检查自动滚动和多帧拼接。
+7. 上传 AppImage 和 SHA-256 校验文件，Artifact 保留 14 天。
+8. 创建或更新 `continuous` GitHub Release，并覆盖同名 Release Assets。
 
 ## 工作原理
 

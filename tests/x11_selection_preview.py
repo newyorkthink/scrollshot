@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""在真实 X11 虚拟显示中验证框选背景预览与鼠标框选。"""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+import threading
+import time
+import tkinter as tk
+from pathlib import Path
+
+MODULE_PATH = Path(__file__).resolve().parents[1] / "src" / "scrollshot.py"
+SPEC = importlib.util.spec_from_file_location("scrollshot", MODULE_PATH)
+assert SPEC is not None and SPEC.loader is not None
+scrollshot = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = scrollshot
+SPEC.loader.exec_module(scrollshot)
+
+root = tk.Tk()
+root.geometry("640x420+40+40")
+root.configure(background="white")
+label = tk.Label(
+    root,
+    text="Selection preview smoke test",
+    foreground="black",
+    background="white",
+    font=("Sans", 24, "bold"),
+)
+label.pack(expand=True, fill="both")
+root.update_idletasks()
+root.update()
+
+frame = scrollshot.capture_desktop_frame()
+preview = scrollshot.build_selection_preview(frame)
+photo = tk.PhotoImage(data=scrollshot.frame_to_ppm(preview), format="PPM")
+
+assert frame.shape[:2] == preview.shape[:2]
+assert photo.width() == frame.shape[1]
+assert photo.height() == frame.shape[0]
+assert float(frame.mean()) > 20.0
+assert 0.0 < float(preview.mean()) < float(frame.mean())
+root.destroy()
+
+
+def perform_drag() -> None:
+    time.sleep(0.8)
+    X, display_module, xtest = scrollshot.import_x11()
+    x_display = display_module.Display()
+    try:
+        xtest.fake_input(x_display, X.MotionNotify, x=100, y=120)
+        xtest.fake_input(x_display, X.ButtonPress, 1)
+        x_display.sync()
+        time.sleep(0.1)
+        xtest.fake_input(x_display, X.MotionNotify, x=520, y=420)
+        x_display.sync()
+        time.sleep(0.1)
+        xtest.fake_input(x_display, X.ButtonRelease, 1)
+        x_display.sync()
+    finally:
+        x_display.close()
+
+
+drag_thread = threading.Thread(target=perform_drag, daemon=True)
+drag_thread.start()
+region = scrollshot.select_region()
+drag_thread.join(timeout=2)
+
+assert region == scrollshot.Region(100, 120, 420, 300), region
+print("selection preview smoke test passed")

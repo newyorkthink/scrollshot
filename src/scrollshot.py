@@ -23,8 +23,9 @@ except ImportError as exc:
     )
     raise SystemExit(3) from exc
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 MIN_REGION_SIZE = 32
+SELECTION_PREVIEW_BRIGHTNESS = 0.62
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,68 @@ def unique_output_path(path: Path) -> Path:
     raise CaptureError("无法生成唯一输出文件名，请更换输出目录。")
 
 
+def decode_x11_image(data: bytes | str, width: int, height: int) -> np.ndarray:
+    if width <= 0 or height <= 0:
+        raise CaptureError("X11 返回了无效的图像尺寸。")
+
+    raw_data = data.encode("latin-1") if isinstance(data, str) else data
+    pixel_count = width * height
+    if len(raw_data) % pixel_count != 0:
+        raise CaptureError("X11 返回的图像数据长度无效。")
+
+    bytes_per_pixel = len(raw_data) // pixel_count
+    raw = np.frombuffer(raw_data, dtype=np.uint8)
+    if bytes_per_pixel == 4:
+        frame = raw.reshape(height, width, 4)[:, :, :3]
+    elif bytes_per_pixel == 3:
+        frame = raw.reshape(height, width, 3)
+    else:
+        raise CaptureError(f"不支持每像素 {bytes_per_pixel} 字节的 X11 格式。")
+    return np.ascontiguousarray(frame)
+
+
+def build_selection_preview(frame: np.ndarray) -> np.ndarray:
+    if frame.ndim != 3 or frame.shape[2] != 3:
+        raise CaptureError("框选预览必须是三通道图像。")
+    preview = np.clip(
+        frame.astype(np.float32) * SELECTION_PREVIEW_BRIGHTNESS,
+        0,
+        255,
+    ).astype(np.uint8)
+    return np.ascontiguousarray(preview)
+
+
+def frame_to_ppm(frame: np.ndarray) -> bytes:
+    if frame.ndim != 3 or frame.shape[2] != 3:
+        raise CaptureError("PPM 预览必须是三通道图像。")
+    height, width = frame.shape[:2]
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    header = f"P6\n{width} {height}\n255\n".encode("ascii")
+    return header + rgb.tobytes()
+
+
+def capture_desktop_frame() -> np.ndarray:
+    X, display_module, _ = import_x11()
+    x_display = display_module.Display()
+    try:
+        screen = x_display.screen()
+        width = int(screen.width_in_pixels)
+        height = int(screen.height_in_pixels)
+        image = screen.root.get_image(
+            0,
+            0,
+            width,
+            height,
+            X.ZPixmap,
+            0xFFFFFFFF,
+        )
+        if image is None:
+            raise CaptureError("X11 未返回桌面图像。")
+        return decode_x11_image(image.data, width, height)
+    finally:
+        x_display.close()
+
+
 def select_region() -> Region:
     if not os.environ.get("DISPLAY"):
         raise CaptureError("未检测到 DISPLAY；只能在 X11 图形会话中运行。")
@@ -99,12 +162,9 @@ def select_region() -> Region:
     except ImportError as exc:
         raise CaptureError("缺少 python3-tk，请先安装该软件包。") from exc
 
-    _, display_module, _ = import_x11()
-    x_display = display_module.Display()
-    screen = x_display.screen()
-    screen_width = screen.width_in_pixels
-    screen_height = screen.height_in_pixels
-    x_display.close()
+    desktop_frame = capture_desktop_frame()
+    screen_height, screen_width = desktop_frame.shape[:2]
+    preview_ppm = frame_to_ppm(build_selection_preview(desktop_frame))
 
     state: dict[str, object] = {
         "region": None,
@@ -116,13 +176,28 @@ def select_region() -> Region:
     root = tk.Tk()
     root.overrideredirect(True)
     root.attributes("-topmost", True)
-    root.attributes("-alpha", 0.28)
     root.geometry(f"{screen_width}x{screen_height}+0+0")
-    canvas = tk.Canvas(root, background="black", cursor="crosshair", highlightthickness=0)
+    canvas = tk.Canvas(root, cursor="crosshair", highlightthickness=0)
     canvas.pack(fill="both", expand=True)
+
+    background_photo = tk.PhotoImage(data=preview_ppm, format="PPM")
+    canvas.create_image(0, 0, image=background_photo, anchor="nw")
+    canvas.background_photo = background_photo
+
+    notice_width = min(560, max(360, screen_width - 40))
+    notice_left = (screen_width - notice_width) // 2
+    canvas.create_rectangle(
+        notice_left,
+        14,
+        notice_left + notice_width,
+        60,
+        fill="#111827",
+        outline="#374151",
+        width=1,
+    )
     canvas.create_text(
         screen_width // 2,
-        36,
+        37,
         text="拖动鼠标框选滚动区域；按 Esc 取消",
         fill="white",
         font=("Sans", 15, "bold"),
@@ -139,7 +214,7 @@ def select_region() -> Region:
             state["start_y"],
             state["start_x"],
             state["start_y"],
-            outline="white",
+            outline="#22d3ee",
             width=3,
         )
 
@@ -171,6 +246,7 @@ def select_region() -> Region:
     canvas.bind("<B1-Motion>", on_drag)
     canvas.bind("<ButtonRelease-1>", on_release)
     root.bind("<Escape>", on_cancel)
+    root.lift()
     root.focus_force()
     try:
         root.mainloop()
@@ -230,18 +306,7 @@ class X11Controller:
         )
         if image is None:
             raise CaptureError("X11 未返回截图数据。")
-
-        # python-xlib 在部分 Python 版本中会返回 Latin-1 字符串。
-        data = image.data.encode("latin-1") if isinstance(image.data, str) else image.data
-        bytes_per_pixel = len(data) // (region.width * region.height)
-        raw = np.frombuffer(data, dtype=np.uint8)
-        if bytes_per_pixel == 4:
-            frame = raw.reshape(region.height, region.width, 4)[:, :, :3]
-        elif bytes_per_pixel == 3:
-            frame = raw.reshape(region.height, region.width, 3)
-        else:
-            raise CaptureError(f"不支持每像素 {bytes_per_pixel} 字节的 X11 格式。")
-        return np.ascontiguousarray(frame)
+        return decode_x11_image(image.data, region.width, region.height)
 
 
 def to_gray(frame: np.ndarray) -> np.ndarray:
