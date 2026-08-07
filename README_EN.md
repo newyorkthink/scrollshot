@@ -23,6 +23,7 @@ The repository treats the implementation that completed long Dolphin lists, brow
 - Adapt the internal minimum overlap to short selections instead of failing with `--min-overlap must be smaller than the capture height`
 - Detect scrolling content separately from fixed headers and footers and keep fixed regions only once
 - Use a conservative browser fallback matcher when the primary matcher is unreliable, reducing premature stops after real scrolling
+- When one overlap round is temporarily ambiguous, taller selections continue with small recovery scrolls from the last confirmed frame instead of ending immediately on one PDF/repetitive-layout mismatch
 - Detect fixed browser sidebars and the right-edge scrollbar so they are not repeatedly appended to the long image
 - Provide fallback matching for PDF/full-window GUI captures and handle multi-row seams, fixed viewport borders, and repeated dark separator lines
 - Apply structural verification to repetitive striped or table-like layouts to reduce periodic false matches near the page bottom
@@ -38,7 +39,7 @@ The repository treats the implementation that completed long Dolphin lists, brow
 - x86_64 Linux
 - An X11 graphical session
 - Native Wayland sessions are not supported
-- Desktop notifications use the system `notify-send` command; if it or a notification daemon is unavailable, screenshots are still saved normally
+- Desktop notifications use the system `notify-send` client and the Freedesktop Notifications standard; they are not tied to Dunst and work with compatible services such as Dunst, GNOME, KDE Plasma, and Xfce
 
 ## Download the stable AppImage
 
@@ -69,7 +70,7 @@ Procedure:
 2. Use the full-screen crosshair for alignment while the magnifier remains beside the pointer.
 3. Drag to select the actual scrolling area; the magnifier shows X/Y coordinates and selection width/height in real time.
 4. Do not move or cover the target after releasing the mouse button.
-5. ScrollShot scrolls, detects fixed regions, and stitches the frames. Browsers and PDF/full-window GUI captures use conservative fallback paths when the primary match is unreliable.
+5. ScrollShot scrolls, detects fixed regions, and stitches the frames. Browsers and PDF/full-window GUI captures use conservative fallback paths when the primary match is unreliable; one temporary mismatch gets small recovery scroll attempts before capture is allowed to stop.
 6. The PNG is saved to `~/Pictures/` by default, and a desktop notification shows the final path after a successful save.
 
 Press `Esc` during selection to cancel regardless of keyboard focus. After capture starts, press `Esc` or `Ctrl+C` in the launching terminal to stop early and save the confirmed portion. Changing the i3/EWMH workspace during capture also stops the current capture and saves the confirmed portion so frames from different workspaces are not mixed.
@@ -118,6 +119,7 @@ Run in a **Linux X11 graphical terminal**:
 - Short selections automatically lower the internal overlap requirement; when no reliable motion can be detected, ScrollShot keeps the confirmed single frame or partial result instead of failing on the default overlap value.
 - A non-scrollable area stops after the image remains unchanged and is saved as a single frame.
 - The desktop notification is an additional post-save hint. If `notify-send` or the notification daemon is unavailable, the PNG itself is unaffected.
+- Before launching the system `notify-send`, the AppImage restores the host library search path modified by PyInstaller so the notification client does not accidentally load bundled AppImage libraries.
 
 ## GitHub Actions
 
