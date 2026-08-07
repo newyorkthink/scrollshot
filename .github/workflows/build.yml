@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - README.md
+      - README_EN.md
+      - LICENSE
   workflow_dispatch:
 
 permissions:
@@ -15,7 +19,7 @@ concurrency:
 
 env:
   APPIMAGE_NAME: scrollshot.AppImage
-  RELEASE_TAG: continuous
+  RELEASE_TAG: latest
 
 jobs:
   build-x86_64:
@@ -166,25 +170,39 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish rolling GitHub Release
+      - name: Publish latest stable GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
+          while IFS= read -r old_tag; do
+            [ -n "${old_tag}" ] || continue
+            if [ "${old_tag}" != "${RELEASE_TAG}" ]; then
+              gh release delete "${old_tag}" --cleanup-tag --yes
+            fi
+          done < <(gh release list --limit 100 --json tagName --jq '.[].tagName')
+
+          git tag -f "${RELEASE_TAG}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${RELEASE_TAG}" --force
+
+          release_notes="Stable AppImage built and tested from main commit ${GITHUB_SHA}. This repository keeps only the latest release."
+
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
-            gh release delete-asset "${RELEASE_TAG}" "ScrollShot-x86_64.AppImage" --yes 2>/dev/null || true
-            gh release delete-asset "${RELEASE_TAG}" "ScrollShot-x86_64.AppImage.sha256" --yes 2>/dev/null || true
             gh release upload "${RELEASE_TAG}" \
               "dist/${APPIMAGE_NAME}" \
               "dist/${APPIMAGE_NAME}.sha256" \
               --clobber
+            gh release edit "${RELEASE_TAG}" \
+              --title "ScrollShot Latest" \
+              --notes "${release_notes}" \
+              --latest
           else
             gh release create "${RELEASE_TAG}" \
               "dist/${APPIMAGE_NAME}" \
               "dist/${APPIMAGE_NAME}.sha256" \
               --target "${GITHUB_SHA}" \
-              --title "ScrollShot Continuous" \
-              --notes "Automatically built and tested AppImage from the latest main branch commit." \
+              --title "ScrollShot Latest" \
+              --notes "${release_notes}" \
               --latest
           fi

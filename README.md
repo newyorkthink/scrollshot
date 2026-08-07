@@ -8,6 +8,8 @@
 
 ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器、设置窗口和其他可滚动区域进行自动滚动、重叠检测与 PNG 拼接。
 
+当前仓库以已经实际完成 Dolphin 长列表滚动截图的实现作为稳定基线；后续修改应保留现有框选、i3 工作区切换、`Esc`、放大镜和拼接行为。
+
 ## 主要功能
 
 - 鼠标框选任意矩形区域
@@ -19,11 +21,10 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器、
 - `Esc` 通过 X11 全局按键监听取消，不依赖框选窗口是否获得焦点
 - 框选时显示桌面预览，不依赖窗口透明效果
 - 根据最终框选高度自动缩小内部最小重叠值，较矮选区不会再直接报 `--min-overlap must be smaller than the capture height`
-- 自动识别滚动内容与固定页头、固定页脚
-- 固定区域只保留一次，避免工具栏和按钮重复出现在结果中
+- 自动识别滚动内容与固定页头、固定页脚，固定区域只保留一次
+- 对重复灰白条纹、表格行等布局增加结构特征校验，降低周期性误匹配导致的底部丢段或错位
 - 捕获期间不持续向终端输出日志，避免终端内容反过来干扰截图
-- 自动识别页面底部
-- 无可靠滚动位移时停止，不把局部闪烁误判为整页滚动
+- 自动识别页面底部；无可靠滚动位移时停止，不把局部闪烁误判为整页滚动
 - 输出文件自动避让同名文件，不覆盖已有截图
 - `Ctrl+C` 可提前停止并保存已经完成的部分
 
@@ -33,14 +34,16 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器、
 - X11 图形会话
 - 不支持原生 Wayland 会话
 
-## 获取 AppImage
+## 获取稳定 AppImage
 
-从 [Releases](https://github.com/newyorkthink/scrollshot/releases/latest) 下载：
+仓库只维护一个 GitHub Release：`latest`。每次 `main` 的有效代码构建和测试全部通过后，会更新同一个 `latest` Release，不保留旧 Release。
 
-- [scrollshot.AppImage](https://github.com/newyorkthink/scrollshot/releases/download/continuous/scrollshot.AppImage)
-- [scrollshot.AppImage.sha256](https://github.com/newyorkthink/scrollshot/releases/download/continuous/scrollshot.AppImage.sha256)
+从 [Latest Release](https://github.com/newyorkthink/scrollshot/releases/latest) 下载：
 
-`continuous` Release 会在 `main` 分支构建和测试通过后自动更新，固定下载链接保持不变。
+- [scrollshot.AppImage](https://github.com/newyorkthink/scrollshot/releases/latest/download/scrollshot.AppImage)
+- [scrollshot.AppImage.sha256](https://github.com/newyorkthink/scrollshot/releases/latest/download/scrollshot.AppImage.sha256)
+
+GitHub 自动生成的 `Source code (zip)` 和 `Source code (tar.gz)` 属于 Release 固有项目，不能从 Release 资产列表中隐藏。
 
 ## 基本使用
 
@@ -110,17 +113,18 @@ chmod +x scrollshot.AppImage
 
 ## GitHub Actions
 
-`Build ScrollShot AppImage` 工作流在 `main` 分支每次产生提交后自动运行，包括只修改 README 的提交。
+`Build ScrollShot AppImage` 工作流在 `main` 分支发生有效构建相关修改时运行；只修改 `README.md`、`README_EN.md` 或 `LICENSE` 不会消耗一次完整 AppImage 构建。
 
 工作流会执行：
 
 1. Python 语法检查和单元测试。
 2. Xvfb 框选预览、全屏十字线、跟随鼠标的像素放大镜、`Alt` 快捷键可用性、快速工作区切换、焦点保持与全局 `Esc` 测试。
-3. 固定页头、固定页脚滚动窗口测试，并验证较矮选区不会触发默认最小重叠错误。
-4. PyInstaller 构建和 AppDir 组装。
+3. 固定页头、固定页脚、重复条纹布局和较矮选区的回归测试。
+4. PyInstaller 构建和 AppDir 组装，并检查桌面文件、图标和启动入口。
 5. 使用 `appimagetool` 生成 `scrollshot.AppImage`。
 6. 运行 AppImage 本体并检查滚动拼接结果。
-7. 更新 `continuous` Release 和 SHA-256 校验文件。
+7. 生成 SHA-256 校验文件。
+8. 删除旧 Release，仅更新 `latest` Release 及其 AppImage 资产。
 
 ## License
 
