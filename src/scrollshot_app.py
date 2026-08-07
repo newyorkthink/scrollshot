@@ -13,10 +13,16 @@ if local_library.is_dir():
 import scrollshot as core
 from capture_options import effective_min_overlap
 from selection_guides import create_select_region
+from structural_match import create_structural_estimator
 
 _interactive_selector = create_select_region(core)
 _core_run_capture = core.run_capture
+_core_estimate_vertical_shift = core.estimate_vertical_shift
 core.select_region = _interactive_selector
+core.estimate_vertical_shift = create_structural_estimator(
+    core,
+    _core_estimate_vertical_shift,
+)
 
 
 def run_capture_with_adaptive_overlap(args):

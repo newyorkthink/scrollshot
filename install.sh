@@ -19,6 +19,9 @@ install -m 0644 "${SCRIPT_DIR}/src/pointer_guides.py" "${INSTALL_LIB_DIR}/pointe
 install -m 0644 "${SCRIPT_DIR}/src/selection_ui.py" "${INSTALL_LIB_DIR}/selection_ui.py"
 install -m 0644 "${SCRIPT_DIR}/src/selection_guides.py" "${INSTALL_LIB_DIR}/selection_guides.py"
 
+# 安装用于排除重复条纹误匹配的结构特征校验模块
+install -m 0644 "${SCRIPT_DIR}/src/structural_match.py" "${INSTALL_LIB_DIR}/structural_match.py"
+
 # 安装启动入口，运行时自动加载 ~/.local/lib/scrollshot 中的模块
 install -m 0755 "${SCRIPT_DIR}/src/scrollshot_app.py" "${TARGET}"
 
