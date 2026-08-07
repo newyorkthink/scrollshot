@@ -15,6 +15,12 @@ STATIC_SAME_MAX_ERROR = 2.5
 STATIC_EVIDENCE_MARGIN = 1.5
 STATIC_NEUTRAL_MAX_ERROR = 0.4
 
+MOVING_RIGHT_EDGE_BLOCK = 4
+MOVING_RIGHT_EDGE_MAX_PIXELS = 24
+MOVING_RIGHT_EDGE_ROW_ERROR = 4.0
+MOVING_RIGHT_EDGE_STATIC_FRACTION = 0.68
+MOVING_RIGHT_EDGE_MIN_WIDTH = 8
+
 
 def _select_consensus_band(
     frames: Sequence[np.ndarray],
@@ -130,6 +136,83 @@ def _detect_static_side_bands(
     if left + right >= width:
         return 0, 0
     return left, right
+
+
+def _detect_moving_right_edge(
+    frames: Sequence[np.ndarray],
+    matches: Sequence[object],
+    top: int,
+    bottom: int,
+) -> int:
+    """Detect a narrow viewport-fixed right edge whose thumb or indicator moves."""
+
+    if len(frames) < 2 or not matches:
+        return 0
+
+    height, width = frames[0].shape[:2]
+    maximum_width = min(
+        MOVING_RIGHT_EDGE_MAX_PIXELS,
+        max(0, width // 12),
+    )
+    maximum_width -= maximum_width % MOVING_RIGHT_EDGE_BLOCK
+    if maximum_width < MOVING_RIGHT_EDGE_MIN_WIDTH or bottom - top < 48:
+        return 0
+
+    pair_errors: list[np.ndarray] = []
+    for previous, current, match in zip(frames, frames[1:], matches):
+        shift = int(match.shift)
+        compare_end = min(bottom, height - shift)
+        if shift <= 0 or compare_end - top < 48:
+            continue
+
+        previous_static = previous[top:compare_end, width - maximum_width :].astype(
+            np.int16,
+            copy=False,
+        )
+        current_static = current[top:compare_end, width - maximum_width :].astype(
+            np.int16,
+            copy=False,
+        )
+        if previous_static.shape != current_static.shape:
+            continue
+
+        pair_errors.append(
+            np.mean(
+                np.abs(previous_static - current_static),
+                axis=2,
+            )
+        )
+
+    if not pair_errors:
+        return 0
+
+    static_flags: list[bool] = []
+    for offset in range(0, maximum_width, MOVING_RIGHT_EDGE_BLOCK):
+        start = maximum_width - offset - MOVING_RIGHT_EDGE_BLOCK
+        end = maximum_width - offset
+        fractions = []
+        for errors in pair_errors:
+            row_error = np.mean(errors[:, start:end], axis=1)
+            fractions.append(
+                float(np.mean(row_error <= MOVING_RIGHT_EDGE_ROW_ERROR))
+            )
+        static_flags.append(
+            float(np.median(fractions)) >= MOVING_RIGHT_EDGE_STATIC_FRACTION
+        )
+
+    last_static = -1
+    for index, is_static in enumerate(static_flags):
+        if not is_static:
+            break
+        last_static = index
+
+    if last_static < 0:
+        return 0
+
+    width_detected = (last_static + 1) * MOVING_RIGHT_EDGE_BLOCK
+    if width_detected < MOVING_RIGHT_EDGE_MIN_WIDTH:
+        return 0
+    return width_detected
 
 
 def _side_background_profile(
@@ -251,6 +334,16 @@ def create_resilient_stitcher(
                     selected_band[0],
                     selected_band[1],
                 )
+                moving_right = _detect_moving_right_edge(
+                    frames,
+                    matches,
+                    selected_band[0],
+                    selected_band[1],
+                )
+                static_sides = (
+                    static_sides[0],
+                    max(static_sides[1], moving_right),
+                )
                 if any(static_sides):
                     try:
                         return _stitch_with_common_band(
@@ -288,6 +381,16 @@ def create_resilient_stitcher(
                 matches,
                 top,
                 bottom,
+            )
+            moving_right = _detect_moving_right_edge(
+                frames,
+                matches,
+                top,
+                bottom,
+            )
+            static_sides = (
+                static_sides[0],
+                max(static_sides[1], moving_right),
             )
         try:
             return _stitch_with_common_band(

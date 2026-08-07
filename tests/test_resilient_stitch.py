@@ -94,6 +94,37 @@ def build_browser_frame_with_fixed_sides(
     return frame
 
 
+def build_frame_with_moving_scrollbar(
+    document: np.ndarray,
+    start: int,
+    thumb_y: int,
+    *,
+    viewport_height: int = 720,
+    right_width: int = 16,
+    header_height: int = 80,
+    footer_height: int = 60,
+) -> np.ndarray:
+    width = document.shape[1] + right_width
+    content_height = viewport_height - header_height - footer_height
+    frame = np.full((viewport_height, width, 3), 248, dtype=np.uint8)
+    frame[:header_height, :-right_width] = (30, 35, 45)
+    frame[-footer_height:, :-right_width] = (232, 234, 236)
+    frame[
+        header_height : viewport_height - footer_height,
+        :-right_width,
+    ] = document[start : start + content_height]
+
+    frame[:, -right_width:] = (248, 248, 248)
+    cv2.rectangle(
+        frame,
+        (width - 8, thumb_y),
+        (width - 5, min(viewport_height - 1, thumb_y + 72)),
+        (150, 150, 150),
+        -1,
+    )
+    return frame
+
+
 class ResilientStitchTests(unittest.TestCase):
     def test_successful_baseline_is_left_unchanged(self) -> None:
         core = SimpleNamespace(ShiftMatch=ShiftMatch)
@@ -204,6 +235,90 @@ class ResilientStitchTests(unittest.TestCase):
                 repeated[appended_start:appended_end, :180],
             )
         )
+
+    def test_moving_right_scrollbar_is_not_repeated(self) -> None:
+        rng = np.random.default_rng(20260807)
+        document = rng.integers(
+            0,
+            255,
+            size=(2400, 744, 3),
+            dtype=np.uint8,
+        )
+        shifts = [180, 170, 95]
+        starts = [0, 180, 350, 445]
+        frames = [
+            build_frame_with_moving_scrollbar(document, start, thumb_y)
+            for start, thumb_y in zip(starts, (110, 510, 520, 570))
+        ]
+        matches = [
+            ShiftMatch(shift, content_top=80, content_bottom=660)
+            for shift in shifts
+        ]
+
+        def baseline(frames, shifts):
+            pieces = [frames[0][:660]]
+            for frame, match in zip(frames[1:], shifts):
+                pieces.append(frame[660 - int(match.shift) : 660])
+            pieces.append(frames[-1][660:])
+            return np.ascontiguousarray(np.concatenate(pieces, axis=0))
+
+        core = SimpleNamespace(ShiftMatch=ShiftMatch)
+        wrapper = create_resilient_stitcher(core, baseline)
+        stitched = wrapper(frames, matches)
+        repeated = baseline(frames, matches)
+
+        self.assertEqual(stitched.shape[:2], (720 + sum(shifts), 760))
+        np.testing.assert_array_equal(stitched[:, :-16], repeated[:, :-16])
+
+        appended_start = 660
+        appended_end = appended_start + sum(shifts)
+        right_profile = np.rint(
+            np.median(frames[0][80:660, -16:], axis=0)
+        ).astype(np.uint8)
+
+        np.testing.assert_array_equal(
+            stitched[appended_start:appended_end, -16:],
+            np.broadcast_to(
+                right_profile,
+                (sum(shifts), 16, 3),
+            ),
+        )
+        self.assertFalse(
+            np.array_equal(
+                stitched[appended_start:appended_end, -16:],
+                repeated[appended_start:appended_end, -16:],
+            )
+        )
+
+    def test_scrolling_content_at_right_edge_is_not_masked(self) -> None:
+        rng = np.random.default_rng(20260808)
+        document = rng.integers(
+            0,
+            255,
+            size=(2400, 760, 3),
+            dtype=np.uint8,
+        )
+        shifts = [180, 170, 95]
+        starts = [0, 180, 350, 445]
+        frames = [build_frame(document, start) for start in starts]
+        matches = [
+            ShiftMatch(shift, content_top=80, content_bottom=660)
+            for shift in shifts
+        ]
+
+        def baseline(frames, shifts):
+            pieces = [frames[0][:660]]
+            for frame, match in zip(frames[1:], shifts):
+                pieces.append(frame[660 - int(match.shift) : 660])
+            pieces.append(frames[-1][660:])
+            return np.ascontiguousarray(np.concatenate(pieces, axis=0))
+
+        core = SimpleNamespace(ShiftMatch=ShiftMatch)
+        wrapper = create_resilient_stitcher(core, baseline)
+        repeated = baseline(frames, matches)
+        stitched = wrapper(frames, matches)
+
+        np.testing.assert_array_equal(stitched, repeated)
 
     def test_non_recoverable_programming_error_is_not_hidden(self) -> None:
         core = SimpleNamespace(ShiftMatch=ShiftMatch)
