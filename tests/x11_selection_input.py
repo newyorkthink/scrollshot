@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify selection keeps focus available and catches Esc globally."""
+"""验证 Alt 工作区快捷键不被占用、快速切换不抢焦点及全局 Esc。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-from Xlib import X, XK, display
+from Xlib import X, XK, display, error
 from Xlib.ext import xtest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,7 +52,7 @@ control_display.sync()
 worker_errors: queue.SimpleQueue[BaseException] = queue.SimpleQueue()
 
 
-def send_workspace_change_and_escape() -> None:
+def verify_shortcut_and_switch_workspaces() -> None:
     try:
         time.sleep(0.8)
         worker_display = display.Display()
@@ -61,16 +61,43 @@ def send_workspace_change_and_escape() -> None:
             focused_id = getattr(focused, "id", focused)
             assert focused_id == focus_window.id, (focused_id, focus_window.id)
 
+            one_keycode = worker_display.keysym_to_keycode(
+                XK.string_to_keysym("1")
+            )
+            try:
+                worker_display.screen().root.grab_key(
+                    one_keycode,
+                    X.Mod1Mask,
+                    False,
+                    X.GrabModeAsync,
+                    X.GrabModeAsync,
+                )
+                worker_display.sync()
+            except error.BadAccess as exc:
+                raise AssertionError("Alt+1 was unexpectedly grabbed") from exc
+            finally:
+                worker_display.screen().root.ungrab_key(
+                    one_keycode,
+                    X.Mod1Mask,
+                )
+                worker_display.sync()
+
             workspace_atom = worker_display.intern_atom("_NET_CURRENT_DESKTOP")
             cardinal_atom = worker_display.intern_atom("CARDINAL")
-            worker_display.screen().root.change_property(
-                workspace_atom,
-                cardinal_atom,
-                32,
-                [1],
-            )
-            worker_display.sync()
-            time.sleep(0.25)
+            for desktop in (1, 2, 3, 1):
+                worker_display.screen().root.change_property(
+                    workspace_atom,
+                    cardinal_atom,
+                    32,
+                    [desktop],
+                )
+                worker_display.sync()
+                time.sleep(0.04)
+
+            time.sleep(0.65)
+            focused = worker_display.get_input_focus().focus
+            focused_id = getattr(focused, "id", focused)
+            assert focused_id == focus_window.id, (focused_id, focus_window.id)
 
             escape_keycode = worker_display.keysym_to_keycode(
                 XK.string_to_keysym("Escape")
@@ -84,7 +111,10 @@ def send_workspace_change_and_escape() -> None:
         worker_errors.put(exc)
 
 
-worker = threading.Thread(target=send_workspace_change_and_escape, daemon=True)
+worker = threading.Thread(
+    target=verify_shortcut_and_switch_workspaces,
+    daemon=True,
+)
 worker.start()
 try:
     selector()
@@ -93,7 +123,7 @@ except core.SelectionCancelled:
 else:
     raise AssertionError("plain Esc did not cancel selection")
 finally:
-    worker.join(timeout=3)
+    worker.join(timeout=4)
     focus_window.destroy()
     control_display.close()
 
@@ -102,4 +132,4 @@ if worker.is_alive():
 if not worker_errors.empty():
     raise worker_errors.get()
 
-print("selection input smoke test passed")
+print("selection input and rapid workspace refresh smoke test passed")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""在真实 X11 虚拟显示中验证框选背景预览与鼠标框选。"""
+"""验证 X11 框选预览、像素放大镜与鼠标框选。"""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import threading
 import time
 import tkinter as tk
 from pathlib import Path
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE_SPEC = importlib.util.spec_from_file_location(
@@ -53,6 +55,27 @@ assert float(frame.mean()) > 20.0
 assert 0.0 < float(preview.mean()) < float(frame.mean())
 root.destroy()
 
+synthetic = np.arange(25 * 25 * 3, dtype=np.uint8).reshape(25, 25, 3)
+magnified = selection_ui.build_magnifier_frame(
+    synthetic,
+    12,
+    10,
+    source_size=5,
+    zoom=4,
+)
+assert magnified.shape == (20, 20, 3), magnified.shape
+assert np.all(magnified[8:12, 8:12] == synthetic[10, 12])
+
+edge_magnified = selection_ui.build_magnifier_frame(
+    synthetic,
+    0,
+    0,
+    source_size=5,
+    zoom=3,
+)
+assert edge_magnified.shape == (15, 15, 3), edge_magnified.shape
+assert np.all(edge_magnified[0:9, 0:9] == synthetic[0, 0])
+
 
 def perform_drag() -> None:
     time.sleep(0.8)
@@ -78,4 +101,4 @@ region = select_region()
 drag_thread.join(timeout=2)
 
 assert region == scrollshot.Region(100, 120, 420, 300), region
-print("selection preview smoke test passed")
+print("selection preview and magnifier smoke test passed")
