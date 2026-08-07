@@ -1,22 +1,26 @@
 # ScrollShot 最终稳定基线笔记（2026-08-07）
 
-本文档用于记录 ScrollShot 当前已经实际验证有效的行为、模块关系、维护边界和回归风险。后续修改应先以本文件为基线检查，不应因为代码看起来“可以简化”就重排、合并或删除已经验证有效的逻辑。
+本文档记录 ScrollShot 当前已经实际验证有效的行为、模块关系、维护边界和回归风险。后续修改应先以本文件为基线检查，不应因为代码看起来“可以简化”就重排、合并或删除已经验证有效的逻辑。
 
-## 1. 稳定基线
+## 1. 最终稳定基线
 
-功能验证锚点：
+已实际验证的运行逻辑锚点：
 
-`27b9925e375ef4a4818ca648e16a1596aa0b5dc5`
+`b5b22693197010e6b30490df6f2a2300f9c93b11`
 
-该锚点包含此前已经完成的浏览器、PDF/整窗 GUI、i3/EWMH、`Esc`、拼接恢复和桌面通知修复。
+该版本包含此前已经完成的浏览器、PDF/整窗 GUI、i3/EWMH、`Esc`、拼接恢复，以及启动器环境下桌面通知修复。
 
-2026-08-07 最终整理阶段只做以下维护工作：
+最终状态已经实际确认：
 
-- 整理中英文 README。
-- 建立本稳定基线笔记。
-- 补充最终装配入口的维护注释。
-- 将稳定基线笔记加入 GitHub Actions 的纯文档忽略列表。
-- 不改变已经实际验证有效的捕获、匹配、拼接、停止和通知行为。
+- Dolphin 长列表滚动截图正常。
+- 浏览器长网页滚动截图正常。
+- PDF/整窗 GUI 可以持续滚动，不再因单轮匹配失败过早停止。
+- 框选、全局 `Esc`、i3/EWMH 工作区切换行为正常。
+- 捕获阶段 `Esc` / `Ctrl+C` / 工作区切换的停止与保存语义正常。
+- 普通终端启动后桌面通知正常。
+- Kando 仅执行 `/usr/local/bin/scrollshot` 时，截图保存后的桌面通知也已经实际验证正常。
+
+后续纯 README / 稳定笔记整理不改变这个已验证运行逻辑，也不应为了文档整理重新生成一个未经实际验证的新 AppImage。
 
 ## 2. 已实际验证的场景
 
@@ -52,11 +56,12 @@
 
 - PNG 保存成功后自动通知。
 - 普通终端直接启动时通知正常。
-- 从启动器启动时通知正常。
+- Kando 启动时通知已经实际验证正常。
 - 已验证 Dunst 可以收到通知，但实现不依赖 Dunst 专有接口。
-- 通知走系统 `notify-send` 和 `org.freedesktop.Notifications`。
-- 如果启动器没有传入 `DBUS_SESSION_BUS_ADDRESS` / `XDG_RUNTIME_DIR`，会尝试标准的 `/run/user/$UID/bus`。
-- PyInstaller/AppImage 的动态库环境在调用宿主机通知程序时按既定逻辑处理。
+- 通知走宿主机 `notify-send` 和 `org.freedesktop.Notifications`。
+- 通知调用不会依赖启动器继承下来的 `DBUS_SESSION_BUS_ADDRESS`。
+- 调用宿主机通知程序前会清理 `LD_LIBRARY_PATH`、`LD_LIBRARY_PATH_ORIG` 和 `LD_PRELOAD`，避免 Kando/AppImage/PyInstaller 的动态库环境污染系统 `notify-send`。
+- 通知 session bus 优先从有效的 `$XDG_RUNTIME_DIR/bus` 构造；无效时回退到 `/run/user/$UID/bus`。
 - 通知失败不得影响已经保存成功的 PNG。
 
 ## 3. 用户侧运行方式
@@ -83,7 +88,7 @@ Kando 只负责启动 ScrollShot，不需要额外添加通知命令。
 /usr/local/bin/scrollshot
 ```
 
-不要在该命令后追加 `&& notify-send ...`。通知属于 ScrollShot 保存成功后的内部行为，不应放到 Kando 动作中重复实现。
+该写法已经实际验证有效。不要在命令后追加 `&& notify-send ...`；通知属于 ScrollShot 保存成功后的内部行为，不应在 Kando 动作中重复实现。
 
 ## 4. 停止行为必须保持一致
 
@@ -127,6 +132,7 @@ create_select_region
 - 把 seam cleanup 提前到原始/稳健拼接之前。
 - 删除 capture runtime 的底部宽限、重试或小步恢复。
 - 将通知放到 PNG 保存之前。
+- 删除启动器通知环境清理和 session bus 重建逻辑。
 - 因为两个模块都处理 PyInstaller/宿主环境就擅自合并或删除其中一段已验证逻辑。
 
 ## 6. 模块职责
@@ -143,24 +149,27 @@ create_select_region
 | `src/resilient_stitch.py` | 固定侧栏、滚动条、PDF 固定边界等稳健拼接 |
 | `src/seam_cleanup.py` | 只在已知拼接点附近进行保守深色缝清理 |
 | `src/capture_runtime.py` | 捕获循环、`Esc`/`Ctrl+C`、工作区保护、底部判定、匹配重试和小步恢复 |
-| `src/scrollshot_app.py` | 按稳定顺序装配所有增强层，并在成功保存后发送桌面通知 |
+| `src/scrollshot_app.py` | 按稳定顺序装配所有增强层；清理启动器通知环境并在成功保存后发送桌面通知 |
+| `tests/test_notification_environment.py` | 模拟 Kando/启动器错误 D-Bus 与动态库环境，回归检查 session bus 重建和环境清理 |
 | `packaging/AppRun` | AppImage 最外层启动入口；保持简单，不重复实现截图或通知逻辑 |
 | `.github/workflows/build.yml` | 静态检查、X11 回归、AppImage 构建/自测、SHA-256 和 `latest` Release |
 
-## 7. 通知链路
+## 7. 最终通知链路
 
-通知保持以下原则：
+通知必须保持以下顺序和原则：
 
 1. 截图先成功写入 PNG。
-2. 捕获运行层完成清理并返回结果。
+2. 捕获运行层完成清理并返回保存结果。
 3. `scrollshot_app.py` 调用 `_notify_capture_saved()`。
-4. 使用宿主机 `notify-send`。
-5. 优先保留现有 `DBUS_SESSION_BUS_ADDRESS`。
-6. 没有该变量时先检查 `$XDG_RUNTIME_DIR/bus`。
-7. 启动器连 `XDG_RUNTIME_DIR` 也没有提供时，再检查 `/run/user/$UID/bus`。
-8. 任何通知异常都吞掉，不改变截图成功返回值。
+4. 从当前环境复制出通知子进程环境。
+5. 清除 `LD_LIBRARY_PATH`、`LD_LIBRARY_PATH_ORIG` 和 `LD_PRELOAD`，不让 Kando/AppImage/PyInstaller 的动态库环境污染宿主机程序。
+6. 不信任启动器继承下来的 `DBUS_SESSION_BUS_ADDRESS`。
+7. 如果 `$XDG_RUNTIME_DIR/bus` 是有效 socket，则据此重建 `DBUS_SESSION_BUS_ADDRESS`。
+8. 如果该路径无效，则检查 `/run/user/$UID/bus` 并据此重建。
+9. 优先调用宿主机常见位置的 `notify-send`，再回退到 `PATH` 查找。
+10. 任何通知异常都吞掉，不改变截图成功返回值。
 
-这一链路已经解决“终端手动 `notify-send` 正常，但从启动器运行 ScrollShot 没通知”的问题。
+这一链路已经实际解决“终端运行 ScrollShot 有通知，但 Kando 运行没有通知”的问题，并已完成 Kando 实测确认。
 
 ## 8. 匹配失败恢复链路
 
@@ -186,6 +195,8 @@ create_select_region
 - `concurrency.cancel-in-progress: true` 保持同一仓库只保留最新构建。
 - 构建通过后更新唯一的 `latest` Release。
 - 不应通过连续小提交反复触发 Actions 来试错。
+
+当前 `tests/test_notification_environment.py` 已纳入普通单元测试发现流程，用来防止以后重新引入 Kando/启动器通知环境回归。
 
 修改 workflow 前必须检查：
 
@@ -220,7 +231,9 @@ create_select_region
 - 是否可能重复固定侧栏、滚动条或 PDF 固定边界。
 - 是否可能重新引入拼接黑线。
 - 是否影响 Kando/其他启动器下的 D-Bus 通知。
-- 是否改变 `LD_LIBRARY_PATH` / `LD_LIBRARY_PATH_ORIG` 处理。
+- 是否重新信任启动器继承的 `DBUS_SESSION_BUS_ADDRESS`。
+- 是否删除 `LD_LIBRARY_PATH` / `LD_LIBRARY_PATH_ORIG` / `LD_PRELOAD` 清理。
+- 是否破坏 `/run/user/$UID/bus` 回退。
 - 是否导致 README-only/笔记-only 修改触发 Actions。
 - 是否修改了无关文件。
 - 是否在提交前完成完整 diff 检查。
@@ -232,5 +245,10 @@ create_select_region
 1. 先与本稳定基线逐项比较，不要同时改多个无关算法。
 2. 保留已经确认有效的命令、参数、模块顺序和停止语义。
 3. 优先定位新改动对稳定链路的影响。
-4. 一次性完成静态检查和完整 diff 后再提交。
-5. 不使用用户真实环境进行无意义的反复试错。
+4. 通知问题优先运行 `tests/test_notification_environment.py` 并核对真实 session bus，不要先改截图逻辑。
+5. 一次性完成静态检查和完整 diff 后再提交。
+6. 不使用用户真实环境进行无意义的反复试错。
+
+## 13. 最终结论
+
+`b5b22693197010e6b30490df6f2a2300f9c93b11` 作为当前已实际验证的运行逻辑稳定锚点保留。后续若只是 README 或维护笔记调整，应保持 `latest` AppImage 不变；只有真正需要修改代码时，才重新走完整 Actions 构建和实际回归验证。

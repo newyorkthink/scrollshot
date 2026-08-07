@@ -10,9 +10,9 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器、
 
 > **最终稳定基线：2026-08-07**
 >
-> 当前功能基线从 `27b9925e375ef4a4818ca648e16a1596aa0b5dc5` 整理而来。该基线已经完成实际长截图与桌面通知验证；本次最终整理只统一文档、维护注释和 Actions 的文档忽略规则，不改变已经有效的捕获、匹配、拼接和通知行为。
+> 当前已实测运行逻辑锚点为 `b5b22693197010e6b30490df6f2a2300f9c93b11`。该版本已经完成 Dolphin、浏览器、PDF/整窗 GUI、i3/EWMH、`Esc`/`Ctrl+C`、工作区保护，以及普通终端和 Kando 启动下的桌面通知验证。
 >
-> 详细维护笔记见 [`STABLE_BASELINE_20260807.md`](STABLE_BASELINE_20260807.md)。
+> 后续纯文档整理不改变这个已验证运行逻辑。详细维护笔记见 [`STABLE_BASELINE_20260807.md`](STABLE_BASELINE_20260807.md)。
 
 ## 已验证的稳定状态
 
@@ -24,7 +24,7 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器、
 - 捕获期间按 `Esc` 或终端 `Ctrl+C` 会提前结束并保存已经确认的部分。
 - 捕获期间切换工作区会停止当前捕获并保存已经确认的部分，避免把其他工作区画面拼入长图。
 - PNG 成功保存后会自动发送桌面通知并显示最终保存路径。
-- 已验证从普通终端和启动器调用时，通知可以通过 Freedesktop Notifications 标准送达；实现不绑定 Dunst。
+- 已实际验证普通终端和 Kando 启动均可收到 Dunst 通知；实现仍使用通用 Freedesktop Notifications 标准，不绑定 Dunst 专有接口。
 
 ## 获取稳定 AppImage
 
@@ -69,7 +69,7 @@ Kando 只需要启动 ScrollShot 本身，不需要在命令后面额外拼接 `
 
 如果使用 AppImage 绝对路径，则直接填写实际 AppImage 路径即可。
 
-通知由 ScrollShot 在 **PNG 成功保存后自动发送**。通知实现使用系统 `notify-send` 和 `org.freedesktop.Notifications`，兼容 Dunst、GNOME、KDE Plasma、Xfce 等实现该标准的通知服务。
+这一启动方式已经实际验证可用：截图完成后由 ScrollShot **自动发送通知**。通知实现使用系统 `notify-send` 和 `org.freedesktop.Notifications`，兼容 Dunst、GNOME、KDE Plasma、Xfce 等实现该标准的通知服务。
 
 ## 操作语义
 
@@ -140,7 +140,7 @@ Kando 只需要启动 ScrollShot 本身，不需要在命令后面额外拼接 `
 - 建议只框选实际滚动内容，不要包含无关窗口。
 - 视频、持续动画、大面积闪烁或非常规覆盖层可能影响重叠检测。
 - 桌面通知依赖宿主机存在 `notify-send` 和可用的 Freedesktop 通知服务；通知失败不影响 PNG。
-- AppImage 调用宿主机通知程序前会处理 PyInstaller 的动态库环境，并在启动器没有传入 D-Bus 会话变量时回退到标准用户 session bus。
+- 调用宿主机 `notify-send` 前会清理启动器/AppImage 继承的 `LD_LIBRARY_PATH`、`LD_LIBRARY_PATH_ORIG` 和 `LD_PRELOAD`；通知 D-Bus 地址会从有效的 `$XDG_RUNTIME_DIR/bus` 重新构造，无效时回退到 `/run/user/$UID/bus`。
 
 ## 稳定架构
 
@@ -166,7 +166,7 @@ Kando 只需要启动 ScrollShot 本身，不需要在命令后面额外拼接 `
 
 工作流会执行：
 
-1. Python 语法检查和单元测试。
+1. Python 语法检查和单元测试，其中包含启动器/Kando 风格环境污染下的通知 session bus 回归测试。
 2. Xvfb 框选预览、全屏十字线、像素放大镜、Alt 快捷键可用性、快速工作区切换、焦点保持和全局 `Esc` 测试。
 3. 固定页头/页脚、重复布局、浏览器/PDF 回退拼接和较矮选区回归测试。
 4. PyInstaller 构建和 AppDir 组装，检查桌面文件、图标与启动入口。
