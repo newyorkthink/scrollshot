@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ScrollShot：Linux X11 自动滚动截图工具。"""
+"""ScrollShot: automatic scrolling screenshots for Linux X11."""
 
 from __future__ import annotations
 
@@ -18,14 +18,14 @@ try:
     import numpy as np
 except ImportError as exc:
     print(
-        "缺少依赖，请安装 python3-numpy python3-opencv python3-xlib python3-tk。",
+        "Missing dependencies: numpy, opencv-python, python-xlib and tkinter.",
         file=sys.stderr,
     )
     raise SystemExit(3) from exc
 
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 MIN_REGION_SIZE = 32
-SELECTION_PREVIEW_BRIGHTNESS = 0.62
+SELECTION_PREVIEW_BRIGHTNESS = 0.48
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,9 @@ class ShiftMatch:
     shift: int
     score: float
     anchors: int
+    content_top: int = 0
+    content_bottom: int = 0
+    alignment_error: float = 0.0
 
 
 class SelectionCancelled(RuntimeError):
@@ -56,21 +59,21 @@ def import_x11():
         from Xlib import X, display
         from Xlib.ext import xtest
     except ImportError as exc:
-        raise CaptureError("缺少 python3-xlib，请先安装该软件包。") from exc
+        raise CaptureError("python-xlib is required.") from exc
     return X, display, xtest
 
 
 def parse_geometry(value: str) -> Region:
     parts = value.split(",")
     if len(parts) != 4:
-        raise argparse.ArgumentTypeError("区域格式必须为 X,Y,WIDTH,HEIGHT")
+        raise argparse.ArgumentTypeError("geometry must be X,Y,WIDTH,HEIGHT")
     try:
         x, y, width, height = (int(part.strip()) for part in parts)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("区域参数必须全部为整数") from exc
+        raise argparse.ArgumentTypeError("geometry values must be integers") from exc
     if width < MIN_REGION_SIZE or height < MIN_REGION_SIZE:
         raise argparse.ArgumentTypeError(
-            f"区域宽度和高度必须至少为 {MIN_REGION_SIZE} 像素"
+            f"width and height must be at least {MIN_REGION_SIZE} pixels"
         )
     return Region(x, y, width, height)
 
@@ -89,17 +92,17 @@ def unique_output_path(path: Path) -> Path:
         candidate = path.with_name(f"{path.stem}-{index:02d}{suffix}")
         if not candidate.exists():
             return candidate
-    raise CaptureError("无法生成唯一输出文件名，请更换输出目录。")
+    raise CaptureError("unable to generate a unique output filename")
 
 
 def decode_x11_image(data: bytes | str, width: int, height: int) -> np.ndarray:
     if width <= 0 or height <= 0:
-        raise CaptureError("X11 返回了无效的图像尺寸。")
+        raise CaptureError("X11 returned invalid image dimensions")
 
     raw_data = data.encode("latin-1") if isinstance(data, str) else data
     pixel_count = width * height
     if len(raw_data) % pixel_count != 0:
-        raise CaptureError("X11 返回的图像数据长度无效。")
+        raise CaptureError("X11 returned an invalid image buffer")
 
     bytes_per_pixel = len(raw_data) // pixel_count
     raw = np.frombuffer(raw_data, dtype=np.uint8)
@@ -108,13 +111,13 @@ def decode_x11_image(data: bytes | str, width: int, height: int) -> np.ndarray:
     elif bytes_per_pixel == 3:
         frame = raw.reshape(height, width, 3)
     else:
-        raise CaptureError(f"不支持每像素 {bytes_per_pixel} 字节的 X11 格式。")
+        raise CaptureError(f"unsupported X11 pixel size: {bytes_per_pixel}")
     return np.ascontiguousarray(frame)
 
 
 def build_selection_preview(frame: np.ndarray) -> np.ndarray:
     if frame.ndim != 3 or frame.shape[2] != 3:
-        raise CaptureError("框选预览必须是三通道图像。")
+        raise CaptureError("selection preview requires a three-channel image")
     preview = np.clip(
         frame.astype(np.float32) * SELECTION_PREVIEW_BRIGHTNESS,
         0,
@@ -125,7 +128,7 @@ def build_selection_preview(frame: np.ndarray) -> np.ndarray:
 
 def frame_to_ppm(frame: np.ndarray) -> bytes:
     if frame.ndim != 3 or frame.shape[2] != 3:
-        raise CaptureError("PPM 预览必须是三通道图像。")
+        raise CaptureError("PPM preview requires a three-channel image")
     height, width = frame.shape[:2]
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     header = f"P6\n{width} {height}\n255\n".encode("ascii")
@@ -133,6 +136,8 @@ def frame_to_ppm(frame: np.ndarray) -> bytes:
 
 
 def capture_desktop_frame() -> np.ndarray:
+    if not os.environ.get("DISPLAY"):
+        raise CaptureError("DISPLAY is not set; X11 is required")
     X, display_module, _ = import_x11()
     x_display = display_module.Display()
     try:
@@ -148,7 +153,7 @@ def capture_desktop_frame() -> np.ndarray:
             0xFFFFFFFF,
         )
         if image is None:
-            raise CaptureError("X11 未返回桌面图像。")
+            raise CaptureError("X11 did not return the desktop image")
         return decode_x11_image(image.data, width, height)
     finally:
         x_display.close()
@@ -156,11 +161,11 @@ def capture_desktop_frame() -> np.ndarray:
 
 def select_region() -> Region:
     if not os.environ.get("DISPLAY"):
-        raise CaptureError("未检测到 DISPLAY；只能在 X11 图形会话中运行。")
+        raise CaptureError("DISPLAY is not set; X11 is required")
     try:
         import tkinter as tk
     except ImportError as exc:
-        raise CaptureError("缺少 python3-tk，请先安装该软件包。") from exc
+        raise CaptureError("tkinter is required") from exc
 
     desktop_frame = capture_desktop_frame()
     screen_height, screen_width = desktop_frame.shape[:2]
@@ -173,6 +178,7 @@ def select_region() -> Region:
         "start_y": 0,
         "rectangle": None,
     }
+
     root = tk.Tk()
     root.overrideredirect(True)
     root.attributes("-topmost", True)
@@ -198,9 +204,9 @@ def select_region() -> Region:
     canvas.create_text(
         screen_width // 2,
         37,
-        text="拖动鼠标框选滚动区域；按 Esc 取消",
+        text="拖动框选滚动区域 / Drag to select · Esc 取消 / Cancel",
         fill="white",
-        font=("Sans", 15, "bold"),
+        font=("Sans", 14, "bold"),
     )
 
     def on_press(event) -> None:
@@ -246,7 +252,6 @@ def select_region() -> Region:
     canvas.bind("<B1-Motion>", on_drag)
     canvas.bind("<ButtonRelease-1>", on_release)
     root.bind("<Escape>", on_cancel)
-    root.lift()
     root.focus_force()
     try:
         root.mainloop()
@@ -261,7 +266,7 @@ def select_region() -> Region:
 class X11Controller:
     def __init__(self) -> None:
         if not os.environ.get("DISPLAY"):
-            raise CaptureError("未检测到 DISPLAY；只能在 X11 图形会话中运行。")
+            raise CaptureError("DISPLAY is not set; X11 is required")
         self.X, display_module, self.xtest = import_x11()
         self.display = display_module.Display()
         self.root = self.display.screen().root
@@ -295,7 +300,7 @@ class X11Controller:
             or region.x + region.width > geometry.width
             or region.y + region.height > geometry.height
         ):
-            raise CaptureError("截图区域超出 X11 根窗口范围。")
+            raise CaptureError("capture region is outside the X11 root window")
         image = self.root.get_image(
             region.x,
             region.y,
@@ -305,7 +310,7 @@ class X11Controller:
             0xFFFFFFFF,
         )
         if image is None:
-            raise CaptureError("X11 未返回截图数据。")
+            raise CaptureError("X11 did not return image data")
         return decode_x11_image(image.data, region.width, region.height)
 
 
@@ -318,45 +323,135 @@ def frames_are_stable(
     current: np.ndarray,
     *,
     pixel_threshold: int = 8,
-    changed_ratio_threshold: float = 0.005,
+    changed_ratio_threshold: float = 0.004,
 ) -> bool:
     if previous.shape != current.shape:
         return False
     height, width = previous.shape[:2]
-    mx, my = max(1, int(width * 0.06)), max(1, int(height * 0.04))
+    mx, my = max(1, int(width * 0.05)), max(1, int(height * 0.03))
     previous_gray = to_gray(previous)[my : height - my, mx : width - mx]
     current_gray = to_gray(current)[my : height - my, mx : width - mx]
     difference = cv2.absdiff(previous_gray, current_gray)
-    return (
-        float(np.mean(difference > pixel_threshold)) <= changed_ratio_threshold
-        and float(np.median(difference)) <= 1.0
+    changed_ratio = float(np.mean(difference > pixel_threshold))
+    return changed_ratio <= changed_ratio_threshold and float(np.median(difference)) <= 1.0
+
+
+def _smooth_1d(values: np.ndarray, window: int) -> np.ndarray:
+    if values.ndim != 1:
+        raise ValueError("_smooth_1d expects one-dimensional input")
+    window = max(1, min(int(window), len(values)))
+    if window % 2 == 0:
+        window = max(1, window - 1)
+    if window == 1:
+        return values.astype(np.float32, copy=True)
+    kernel = np.full(window, 1.0 / window, dtype=np.float32)
+    return np.convolve(values.astype(np.float32), kernel, mode="same")
+
+
+def _largest_true_segment(mask: np.ndarray) -> tuple[int, int] | None:
+    best: tuple[int, int] | None = None
+    start: int | None = None
+    for index, value in enumerate(mask.tolist() + [False]):
+        if value and start is None:
+            start = index
+        elif not value and start is not None:
+            if best is None or index - start > best[1] - best[0]:
+                best = (start, index)
+            start = None
+    return best
+
+
+def detect_motion_band(
+    previous: np.ndarray,
+    current: np.ndarray,
+    *,
+    minimum_ratio: float = 0.16,
+) -> tuple[int, int] | None:
+    """Return the largest vertically contiguous region that visibly changed."""
+
+    if previous.shape != current.shape:
+        return None
+    height, width = previous.shape[:2]
+    if height < 64 or width < 64:
+        return None
+
+    margin_x = max(6, int(width * 0.05))
+    previous_gray = to_gray(previous)[:, margin_x : width - margin_x]
+    current_gray = to_gray(current)[:, margin_x : width - margin_x]
+    row_error = np.mean(
+        cv2.absdiff(previous_gray, current_gray).astype(np.float32),
+        axis=1,
     )
+    smooth = _smooth_1d(row_error, max(7, height // 70))
+    low = float(np.percentile(smooth, 10))
+    high = float(np.percentile(smooth, 90))
+    if high < 2.5:
+        return None
 
+    threshold = min(8.0, max(2.5, low + 0.20 * max(0.0, high - low)))
+    mask = (smooth > threshold).astype(np.uint8).reshape(height, 1)
 
-def _alignment_error(previous: np.ndarray, current: np.ndarray, shift: int) -> float:
-    """使用完整重叠区域评估候选位移，避免周期性布局误匹配。"""
-
-    height, width = previous.shape
-    overlap = height - shift
-    if overlap <= 0:
-        return float("inf")
-
-    # 忽略常见的固定页头、页脚，并降采样控制计算量。
-    top = min(int(height * 0.08), max(0, overlap // 4))
-    bottom = min(int(height * 0.04), max(0, overlap // 6))
-    end = overlap - bottom
-    if end - top < 32:
-        top, end = 0, overlap
-
-    previous_overlap = previous[shift + top : shift + end]
-    current_overlap = current[top:end]
-    step_y = max(1, previous_overlap.shape[0] // 320)
-    step_x = max(1, width // 280)
-    difference = cv2.absdiff(
-        previous_overlap[::step_y, ::step_x],
-        current_overlap[::step_y, ::step_x],
+    close_size = max(9, int(height * 0.055))
+    if close_size % 2 == 0:
+        close_size += 1
+    mask = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_CLOSE,
+        np.ones((close_size, 1), dtype=np.uint8),
     )
-    return float(np.mean(difference))
+    mask = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_OPEN,
+        np.ones((5, 1), dtype=np.uint8),
+    ).ravel().astype(bool)
+
+    segment = _largest_true_segment(mask)
+    if segment is None:
+        return None
+    top, bottom = segment
+
+    relaxed_threshold = max(1.5, threshold * 0.55)
+    while top > 0 and smooth[top - 1] > relaxed_threshold:
+        top -= 1
+    while bottom < height and smooth[bottom] > relaxed_threshold:
+        bottom += 1
+
+    minimum_height = max(64, int(height * minimum_ratio))
+    if bottom - top < minimum_height:
+        return None
+    return top, bottom
+
+
+def _candidate_alignment(
+    previous_gray: np.ndarray,
+    current_gray: np.ndarray,
+    shift: int,
+    band: tuple[int, int],
+) -> tuple[float, float, int] | None:
+    height = previous_gray.shape[0]
+    top, bottom = band
+    compare_end = min(bottom, height - shift)
+    compare_height = compare_end - top
+    if compare_height < max(48, int((bottom - top) * 0.20)):
+        return None
+
+    previous_aligned = previous_gray[top + shift : compare_end + shift]
+    current_aligned = current_gray[top:compare_end]
+    previous_static = previous_gray[top:compare_end]
+
+    step_y = max(1, compare_height // 300)
+    step_x = max(1, previous_gray.shape[1] // 260)
+    aligned_difference = cv2.absdiff(
+        previous_aligned[::step_y, ::step_x],
+        current_aligned[::step_y, ::step_x],
+    )
+    static_difference = cv2.absdiff(
+        previous_static[::step_y, ::step_x],
+        current_aligned[::step_y, ::step_x],
+    )
+    aligned_error = float(np.mean(aligned_difference))
+    static_error = float(np.mean(static_difference))
+    return aligned_error, static_error, compare_height
 
 
 def estimate_vertical_shift(
@@ -374,32 +469,49 @@ def estimate_vertical_shift(
     if height < min_overlap + min_shift + 32 or width < 64 or maximum_shift <= min_shift:
         return None
 
+    band = detect_motion_band(previous, current)
+    if band is None:
+        return None
+    content_top, content_bottom = band
+    content_height = content_bottom - content_top
+    if maximum_shift <= min_shift:
+        return None
+
     margin_x = max(8, int(width * 0.08))
     previous_gray = cv2.GaussianBlur(
-        to_gray(previous)[:, margin_x : width - margin_x], (3, 3), 0
+        to_gray(previous)[:, margin_x : width - margin_x],
+        (3, 3),
+        0,
     )
     current_gray = cv2.GaussianBlur(
-        to_gray(current)[:, margin_x : width - margin_x], (3, 3), 0
+        to_gray(current)[:, margin_x : width - margin_x],
+        (3, 3),
+        0,
     )
-    template_height = min(160, max(48, height // 7))
-    peak_threshold = max(0.50, score_threshold - 0.15)
+
+    template_height = min(140, max(40, content_height // 7))
+    peak_threshold = max(0.50, score_threshold - 0.16)
     candidates: list[tuple[int, float]] = []
 
-    for ratio in (0.16, 0.32, 0.48, 0.64, 0.76):
-        template_y = int(height * ratio)
-        if template_y + template_height >= height:
+    for ratio in (0.10, 0.26, 0.42, 0.58, 0.74):
+        template_y = content_top + int(max(0, content_height - template_height) * ratio)
+        if template_y + template_height > content_bottom:
             continue
         template = current_gray[template_y : template_y + template_height]
-        if float(np.std(template)) < 7.0:
+        if float(np.std(template)) < 6.0:
             continue
+
         search_start = template_y + min_shift
-        search_end = min(height, template_y + maximum_shift + template_height)
+        search_end = min(
+            height,
+            template_y + maximum_shift + template_height,
+        )
         search = previous_gray[search_start:search_end]
         if search.shape[0] < template_height:
             continue
 
         scores = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED).ravel()
-        anchor_candidates = 0
+        kept = 0
         for index in np.argsort(scores)[::-1]:
             score = float(scores[index])
             if score < peak_threshold:
@@ -410,77 +522,110 @@ def estimate_vertical_shift(
             if any(abs(shift - existing) <= 3 for existing, _ in candidates):
                 continue
             candidates.append((shift, score))
-            anchor_candidates += 1
-            # 每个锚点保留多个峰，周期性页面仍能包含真实位移。
-            if anchor_candidates >= 6:
+            kept += 1
+            if kept >= 6:
                 break
 
     if not candidates:
         return None
 
     tolerance = max(4, int(height * 0.012))
-    centers = sorted({shift for shift, _ in candidates})
-    clusters: list[list[tuple[int, float]]] = []
-    for center in centers:
-        cluster = [item for item in candidates if abs(item[0] - center) <= tolerance]
-        if cluster and cluster not in clusters:
-            clusters.append(cluster)
+    verified: list[tuple[float, float, int, float, int]] = []
+    for shift, score in candidates:
+        anchors = sum(1 for other_shift, _ in candidates if abs(other_shift - shift) <= tolerance)
+        result = _candidate_alignment(previous_gray, current_gray, shift, band)
+        if result is None:
+            continue
+        aligned_error, static_error, _compare_height = result
 
-    verified: list[tuple[float, int, float, int]] = []
-    for cluster in clusters:
-        shifts = np.array([shift for shift, _ in cluster], dtype=np.float64)
-        scores = np.array([score for _, score in cluster], dtype=np.float64)
-        shift = int(round(float(np.average(shifts, weights=scores))))
-        if not min_shift <= shift <= maximum_shift:
+        if aligned_error > 30.0:
             continue
-        average_score = float(np.mean(scores))
-        if len(cluster) == 1 and average_score < max(0.86, score_threshold + 0.12):
+        improvement = static_error - aligned_error
+        if improvement < 2.0 and aligned_error > 7.0:
             continue
-        error = _alignment_error(previous_gray, current_gray, shift)
-        verified.append((error, shift, average_score, len(cluster)))
+        if anchors == 1 and score < max(0.84, score_threshold + 0.10):
+            continue
+
+        quality = aligned_error - min(12.0, max(0.0, improvement)) * 0.20
+        verified.append((quality, aligned_error, shift, score, anchors))
 
     if not verified:
         return None
-    error, shift, score, anchors = min(verified, key=lambda item: item[0])
-    if error > 32.0:
-        return None
-    return ShiftMatch(shift, score, anchors)
+
+    _, aligned_error, shift, score, anchors = min(verified, key=lambda item: item[0])
+    return ShiftMatch(
+        shift=shift,
+        score=score,
+        anchors=anchors,
+        content_top=content_top,
+        content_bottom=content_bottom,
+        alignment_error=aligned_error,
+    )
 
 
-def stitch_frames(frames: Sequence[np.ndarray], shifts: Sequence[int]) -> np.ndarray:
+def stitch_frames(
+    frames: Sequence[np.ndarray],
+    shifts: Sequence[int | ShiftMatch],
+) -> np.ndarray:
     if not frames or len(shifts) != len(frames) - 1:
-        raise ValueError("帧数量与位移数量不匹配。")
+        raise ValueError("frame and shift counts do not match")
     width = frames[0].shape[1]
-    if any(frame.shape[1] != width for frame in frames):
-        raise ValueError("所有截图宽度必须一致。")
-    pieces = [frames[0]]
-    for frame, shift in zip(frames[1:], shifts):
-        if shift <= 0 or shift > frame.shape[0]:
-            raise ValueError("检测到无效位移。")
-        pieces.append(frame[-shift:])
-    return np.ascontiguousarray(np.concatenate(pieces, axis=0))
+    height = frames[0].shape[0]
+    if any(frame.shape[:2] != (height, width) for frame in frames):
+        raise ValueError("all frames must have the same dimensions")
+
+    if not shifts:
+        return np.ascontiguousarray(frames[0])
+
+    if all(isinstance(item, int) for item in shifts):
+        pieces = [frames[0]]
+        for frame, raw_shift in zip(frames[1:], shifts):
+            shift = int(raw_shift)
+            if shift <= 0 or shift > frame.shape[0]:
+                raise ValueError("invalid shift")
+            pieces.append(frame[-shift:])
+        return np.ascontiguousarray(np.concatenate(pieces, axis=0))
+
+    matches = [item for item in shifts if isinstance(item, ShiftMatch)]
+    if len(matches) != len(shifts):
+        raise ValueError("shifts must be all integers or all ShiftMatch objects")
+
+    top = max(match.content_top for match in matches)
+    bottom = min(match.content_bottom for match in matches)
+    maximum_shift = max(match.shift for match in matches)
+    if bottom - top <= maximum_shift + 24:
+        raise ValueError("detected scrolling content band is too small")
+
+    pieces = [frames[0][:top], frames[0][top:bottom]]
+    for frame, match in zip(frames[1:], matches):
+        if match.shift <= 0 or match.shift >= bottom - top:
+            raise ValueError("invalid shift")
+        pieces.append(frame[bottom - match.shift : bottom])
+    pieces.append(frames[-1][bottom:])
+    non_empty = [piece for piece in pieces if piece.size]
+    return np.ascontiguousarray(np.concatenate(non_empty, axis=0))
 
 
 def save_png(path: Path, image: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp.png")
     if not cv2.imwrite(str(temporary), image, [cv2.IMWRITE_PNG_COMPRESSION, 3]):
-        raise CaptureError(f"无法写入临时文件：{temporary}")
+        raise CaptureError(f"unable to write temporary file: {temporary}")
     temporary.replace(path)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="scrollshot",
-        description="Linux X11 自动滚动截图、重叠检测与 PNG 拼接工具",
+        description="Automatic scrolling screenshots for Linux X11",
     )
     parser.add_argument("--version", action="version", version=f"ScrollShot {VERSION}")
-    parser.add_argument("-o", "--output", type=Path, help="输出 PNG 路径")
+    parser.add_argument("-o", "--output", type=Path, help="output PNG path")
     parser.add_argument("--geometry", type=parse_geometry, help="X,Y,WIDTH,HEIGHT")
-    parser.add_argument("--scroll-ticks", type=int, default=6, metavar="N")
+    parser.add_argument("--scroll-ticks", type=int, default=3, metavar="N")
     parser.add_argument("--delay", type=float, default=0.55, metavar="SECONDS")
     parser.add_argument("--settle-delay", type=float, default=0.35, metavar="SECONDS")
-    parser.add_argument("--max-frames", type=int, default=80, metavar="N")
+    parser.add_argument("--max-frames", type=int, default=120, metavar="N")
     parser.add_argument("--min-overlap", type=int, default=80, metavar="PIXELS")
     parser.add_argument("--match-threshold", type=float, default=0.68, metavar="SCORE")
     parser.add_argument("--stable-rounds", type=int, default=2, metavar="N")
@@ -490,13 +635,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def validate_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     checks = (
-        (1 <= args.scroll_ticks <= 30, "--scroll-ticks 必须位于 1 到 30"),
-        (0.05 <= args.delay <= 10, "--delay 必须位于 0.05 到 10"),
-        (0 <= args.settle_delay <= 10, "--settle-delay 必须位于 0 到 10"),
-        (2 <= args.max_frames <= 500, "--max-frames 必须位于 2 到 500"),
-        (args.min_overlap >= 32, "--min-overlap 不能小于 32"),
-        (0.4 <= args.match_threshold <= 0.99, "--match-threshold 必须位于 0.4 到 0.99"),
-        (1 <= args.stable_rounds <= 10, "--stable-rounds 必须位于 1 到 10"),
+        (1 <= args.scroll_ticks <= 20, "--scroll-ticks must be between 1 and 20"),
+        (0.05 <= args.delay <= 10, "--delay must be between 0.05 and 10"),
+        (0 <= args.settle_delay <= 10, "--settle-delay must be between 0 and 10"),
+        (2 <= args.max_frames <= 500, "--max-frames must be between 2 and 500"),
+        (args.min_overlap >= 32, "--min-overlap must be at least 32"),
+        (0.4 <= args.match_threshold <= 0.99, "--match-threshold must be between 0.4 and 0.99"),
+        (1 <= args.stable_rounds <= 10, "--stable-rounds must be between 1 and 10"),
     )
     for valid, message in checks:
         if not valid:
@@ -506,7 +651,7 @@ def validate_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace
 def run_capture(args: argparse.Namespace) -> tuple[Path, int, int]:
     region = args.geometry if args.geometry is not None else select_region()
     if args.min_overlap >= region.height - 8:
-        raise CaptureError("--min-overlap 必须明显小于截图区域高度。")
+        raise CaptureError("--min-overlap must be smaller than the capture height")
     output = unique_output_path(args.output or default_output_path())
     debug_dir = args.debug_dir.expanduser().resolve() if args.debug_dir else None
     if debug_dir:
@@ -514,7 +659,7 @@ def run_capture(args: argparse.Namespace) -> tuple[Path, int, int]:
 
     controller = X11Controller()
     frames: list[np.ndarray] = []
-    shifts: list[int] = []
+    matches: list[ShiftMatch] = []
     stable_rounds = 0
     stop_requested = False
 
@@ -530,15 +675,9 @@ def run_capture(args: argparse.Namespace) -> tuple[Path, int, int]:
         frames.append(first)
         if debug_dir:
             cv2.imwrite(str(debug_dir / "frame-000.png"), first)
-        print(
-            f"开始捕获：{region.x},{region.y},{region.width},{region.height}；"
-            "终端按 Ctrl+C 可提前保存。",
-            flush=True,
-        )
 
         for frame_index in range(1, args.max_frames):
             if stop_requested:
-                print("收到停止请求，正在保存已完成结果。", flush=True)
                 break
             controller.move_to_region(region)
             controller.scroll_down(args.scroll_ticks)
@@ -550,13 +689,7 @@ def run_capture(args: argparse.Namespace) -> tuple[Path, int, int]:
             previous = frames[-1]
             if frames_are_stable(previous, current):
                 stable_rounds += 1
-                print(
-                    f"第 {frame_index + 1} 帧：画面未变化 "
-                    f"({stable_rounds}/{args.stable_rounds})",
-                    flush=True,
-                )
                 if stable_rounds >= args.stable_rounds:
-                    print("已检测到页面底部。", flush=True)
                     break
                 continue
 
@@ -568,19 +701,11 @@ def run_capture(args: argparse.Namespace) -> tuple[Path, int, int]:
                 score_threshold=args.match_threshold,
             )
             if match is None:
-                print("未找到可靠重叠区域，保存此前结果。", file=sys.stderr)
                 break
             frames.append(current)
-            shifts.append(match.shift)
-            print(
-                f"第 {frame_index + 1} 帧：新增 {match.shift} 像素，"
-                f"置信度 {match.score:.3f}，锚点 {match.anchors}",
-                flush=True,
-            )
-        else:
-            print(f"已达到最大帧数 {args.max_frames}。", file=sys.stderr)
+            matches.append(match)
 
-        stitched = stitch_frames(frames, shifts)
+        stitched = stitch_frames(frames, matches)
         save_png(output, stitched)
         return output, len(frames), stitched.shape[0]
     finally:
@@ -598,16 +723,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         output, frame_count, height = run_capture(args)
     except SelectionCancelled:
-        print("已取消。")
+        print("Cancelled.")
         return 130
     except CaptureError as exc:
-        print(f"错误：{exc}", file=sys.stderr)
+        print(f"Error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
-        print("已中断。", file=sys.stderr)
+        print("Interrupted.", file=sys.stderr)
         return 130
-    print(f"完成：{output}")
-    print(f"已拼接 {frame_count} 帧，最终高度 {height} 像素。")
+    print(f"Saved: {output}")
+    print(f"Frames: {frame_count}; height: {height}px")
     return 0
 
 

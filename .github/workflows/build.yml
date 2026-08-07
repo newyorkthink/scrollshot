@@ -43,11 +43,15 @@ jobs:
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -r requirements-build.txt
 
+      - name: Check Python syntax
+        run: |
+          .venv/bin/python -m py_compile src/scrollshot.py tests/*.py
+
       - name: Run unit tests
         run: |
           .venv/bin/python -m unittest discover -s tests -v
 
-      - name: Test selection preview in X11 virtual display
+      - name: Test selection preview in X11
         run: |
           xvfb-run -a -s "-screen 0 800x600x24" \
             .venv/bin/python tests/x11_selection_preview.py
@@ -103,9 +107,9 @@ jobs:
             "dist/${APPIMAGE_NAME}"
           chmod +x "dist/${APPIMAGE_NAME}"
 
-      - name: Test AppImage in X11 virtual display
+      - name: Test AppImage with fixed window regions
         run: |
-          APPIMAGE_EXTRACT_AND_RUN=1 "dist/${APPIMAGE_NAME}" --version
+          APPIMAGE_EXTRACT_AND_RUN=1 "dist/${APPIMAGE_NAME}" --version | grep -F 'ScrollShot 0.2.0'
           file "dist/${APPIMAGE_NAME}" | grep -F 'ELF 64-bit'
           rm -f /tmp/scrollshot-ci.png
           xvfb-run -a -s "-screen 0 800x600x24" bash -c '
@@ -114,12 +118,11 @@ jobs:
             demo_pid=$!
             trap "kill ${demo_pid} 2>/dev/null || true" EXIT
             sleep 1
-            APPIMAGE_EXTRACT_AND_RUN=1 "dist/${APPIMAGE_NAME}" \
-              --geometry 0,0,400,400 \
-              --scroll-ticks 6 \
-              --delay 0.55 \
+            APPIMAGE_EXTRACT_AND_RUN=1 dist/scrollshot.AppImage \
+              --geometry 0,0,420,420 \
+              --delay 0.25 \
               --settle-delay 0.1 \
-              --max-frames 20 \
+              --max-frames 30 \
               --stable-rounds 2 \
               --output /tmp/scrollshot-ci.png
           '
@@ -128,7 +131,8 @@ jobs:
 
           image = cv2.imread("/tmp/scrollshot-ci.png")
           assert image is not None
-          assert image.shape[0] > 800, image.shape
+          assert image.shape[1] == 420, image.shape
+          assert image.shape[0] > 450, image.shape
           PY
 
       - name: Generate checksum
@@ -155,7 +159,6 @@ jobs:
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
             gh release delete-asset "${RELEASE_TAG}" "ScrollShot-x86_64.AppImage" --yes 2>/dev/null || true
             gh release delete-asset "${RELEASE_TAG}" "ScrollShot-x86_64.AppImage.sha256" --yes 2>/dev/null || true
-
             gh release upload "${RELEASE_TAG}" \
               "dist/${APPIMAGE_NAME}" \
               "dist/${APPIMAGE_NAME}.sha256" \

@@ -1,20 +1,20 @@
 # ScrollShot
 
-ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器和普通可滚动窗口进行自动滚动、重叠检测与 PNG 拼接。
+[English](README_EN.md)
 
-程序启动后拖动鼠标框选区域，ScrollShot 会将鼠标移动到区域中心，自动向下滚动，检测相邻画面的重叠部分，并将新出现的内容拼接为一张 PNG。
+ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器、设置窗口和其他可滚动区域进行自动滚动、重叠检测与 PNG 拼接。
 
 ## 主要功能
 
 - 鼠标框选任意矩形区域
-- 框选时显示启动瞬间的桌面预览，不依赖窗口透明效果
-- 自动发送向下滚轮事件
-- 多锚点重叠检测，降低重复图案造成的错误拼接
+- 框选时显示桌面预览，不依赖窗口透明效果
+- 自动识别滚动内容与固定页头、固定页脚
+- 固定区域只保留一次，避免工具栏和按钮重复出现在结果中
+- 捕获期间不持续向终端输出日志，避免终端内容反过来干扰截图
 - 自动识别页面底部
-- 匹配失败时停止继续滚动，保留此前已确认的结果
+- 无可靠滚动位移时停止，不把局部闪烁误判为整页滚动
 - 输出文件自动避让同名文件，不覆盖已有截图
-- 支持固定坐标区域，便于接入快捷键或其他启动器
-- `Ctrl+C` 可提前停止并保存当前已完成的拼接结果
+- `Ctrl+C` 可提前停止并保存已经完成的部分
 
 ## 运行环境
 
@@ -24,32 +24,31 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器和
 
 ## 获取 AppImage
 
-进入仓库的 [Releases](https://github.com/newyorkthink/scrollshot/releases/latest) 页面，直接下载：
+从 [Releases](https://github.com/newyorkthink/scrollshot/releases/latest) 下载：
 
 - [scrollshot.AppImage](https://github.com/newyorkthink/scrollshot/releases/download/continuous/scrollshot.AppImage)
 - [scrollshot.AppImage.sha256](https://github.com/newyorkthink/scrollshot/releases/download/continuous/scrollshot.AppImage.sha256)
 
-每次 `main` 分支提交通过完整测试后，`continuous` Release 中的同名 AppImage 和校验文件都会自动覆盖更新，固定下载链接保持不变。
+`continuous` Release 会在 `main` 分支构建和测试通过后自动更新，固定下载链接保持不变。
 
 ## 基本使用
 
 在 **Linux X11 图形终端**执行：
 
 ```bash
-# 为 ScrollShot AppImage 添加执行权限
+# 为 AppImage 添加执行权限
 chmod +x scrollshot.AppImage
 
-# 启动框选并自动完成滚动截图
+# 启动框选滚动截图
 ./scrollshot.AppImage
 ```
 
 操作顺序：
 
-1. 程序先显示启动瞬间的桌面预览。
-2. 拖动鼠标框选需要滚动截图的内容区域。
-3. 松开鼠标后不要操作目标窗口。
-4. 程序自动滚动、检测重叠并拼接。
-5. 检测到页面底部后，PNG 默认保存到 `~/Pictures/`。
+1. 拖动鼠标框选实际需要滚动的区域。
+2. 松开鼠标后不要移动窗口或遮挡框选区域。
+3. 程序自动滚动、识别固定区域并拼接。
+4. PNG 默认保存到 `~/Pictures/`。
 
 按 `Esc` 取消框选。捕获过程中可在启动命令的终端按 `Ctrl+C`，程序会保存已经完成的部分。
 
@@ -58,75 +57,56 @@ chmod +x scrollshot.AppImage
 在 **Linux X11 图形终端**执行：
 
 ```bash
-# 指定输出文件；文件已存在时会自动生成带序号的新文件名
+# 指定输出文件；同名文件存在时自动生成带序号的新文件名
 ./scrollshot.AppImage --output ./web-page.png
 ```
 
 ```bash
-# 使用固定截图区域，跳过鼠标框选
+# 使用固定坐标区域，跳过鼠标框选
 ./scrollshot.AppImage --geometry 100,120,1200,800
 ```
 
 ```bash
-# 页面滚动动画较慢时增加每轮等待时间
+# 调整每轮滚轮次数；默认值为 3
+./scrollshot.AppImage --scroll-ticks 3
+```
+
+```bash
+# 页面滚动动画较慢时增加等待时间
 ./scrollshot.AppImage --delay 0.8
 ```
 
 ```bash
-# 单次滚动距离过大时减少每轮滚轮次数
-./scrollshot.AppImage --scroll-ticks 4
-```
-
-```bash
-# 保存每一张原始帧，用于排查特殊网页的匹配问题
+# 保存每一张原始帧，用于排查特殊窗口
 ./scrollshot.AppImage --debug-dir ./scrollshot-debug
 ```
 
 ```bash
-# 显示 ScrollShot 的完整命令行帮助
+# 显示完整命令行帮助
 ./scrollshot.AppImage --help
 ```
 
-## GitHub Actions 构建
-
-`Build ScrollShot AppImage` 工作流会在 `main` 分支每次产生新提交后自动运行。无论修改程序、工作流、README，还是只改一个字，都会触发一次完整构建；同时保留手动触发入口。
-
-工作流会依次执行：
-
-1. 运行拼接算法单元测试。
-2. 在 Xvfb 虚拟 X11 环境中验证桌面预览和鼠标框选。
-3. 使用 PyInstaller 构建完整程序目录。
-4. 按 AppDir 规范写入 `AppRun`、桌面文件和图标。
-5. 使用官方 `appimagetool` 生成 `scrollshot.AppImage`。
-6. 在 Xvfb 虚拟 X11 环境中运行 AppImage，实际检查自动滚动和多帧拼接。
-7. 上传 AppImage 和 SHA-256 校验文件，Artifact 保留 14 天。
-8. 创建或更新 `continuous` GitHub Release，并覆盖同名 Release Assets。
-
-## 工作原理
-
-每轮捕获后，ScrollShot 从新画面的多个纵向位置提取纹理锚点，并在上一帧中搜索对应区域。多个锚点检测到一致位移后，只追加新帧底部真正新增的像素。画面连续多轮基本不变时，程序判定已到达页面底部。
-
 ## 使用注意
 
-- 框选区域中心必须位于能够响应鼠标滚轮的内容上。
-- 捕获期间不要移动目标窗口、改变缩放比例或遮挡截图区域。
-- 视频、持续动画、大面积闪烁内容可能影响重叠检测。
-- 固定在页面底部的悬浮工具栏可能被重复带入拼接图，建议框选时避开该区域。
-- 浏览器启用平滑滚动且动画时间较长时，可增加 `--delay`。
+- 框选中心必须位于能够响应鼠标滚轮的内容上。
+- 建议框选实际滚动内容；程序可以处理固定页头和页脚，但不应包含无关窗口。
+- 捕获期间不要改变缩放比例、切换标签页或移动目标窗口。
+- 视频、持续动画和大面积闪烁内容可能影响重叠检测。
+- 无法滚动的区域会在画面保持不变后自动停止并保存单帧结果。
 
-## 源码检查
+## GitHub Actions
 
-在已经安装 NumPy 和 OpenCV 的开发环境中执行：
+`Build ScrollShot AppImage` 工作流在 `main` 分支每次产生提交后自动运行，包括只修改 README 的提交。
 
-```bash
-# 运行全部拼接算法单元测试
-python3 -m unittest discover -s tests -v
-```
+工作流会执行：
 
-```bash
-# 检查主程序 Python 语法
-python3 -m py_compile src/scrollshot.py
-```
+1. Python 语法检查和单元测试。
+2. Xvfb 框选预览测试。
+3. 固定页头、固定页脚滚动窗口测试。
+4. PyInstaller 构建和 AppDir 组装。
+5. 使用 `appimagetool` 生成 `scrollshot.AppImage`。
+6. 运行 AppImage 本体并检查滚动拼接结果。
+7. 更新 `continuous` Release 和 SHA-256 校验文件。
 
 ## License
 
