@@ -31,52 +31,51 @@ from structural_match import create_structural_estimator
 
 
 def _notification_environment() -> dict[str, str]:
-    """为宿主机通知程序构造不受 AppImage/PyInstaller 污染的会话环境。"""
+    """为宿主机通知程序构造独立于启动器/AppImage 的用户会话环境。"""
 
     environment = os.environ.copy()
 
-    # 稳定通知基线：PyInstaller 会修改 LD_LIBRARY_PATH。调用宿主机 notify-send
-    # 时必须恢复原值，否则系统程序可能误加载 AppImage 内的动态库并静默失败。
-    if getattr(sys, "frozen", False):
-        original_library_path = environment.get("LD_LIBRARY_PATH_ORIG")
-        if original_library_path:
-            environment["LD_LIBRARY_PATH"] = original_library_path
-        else:
-            environment.pop("LD_LIBRARY_PATH", None)
+    # notify-send 是宿主机程序，不应继承 Kando/AppImage/PyInstaller 注入的动态库路径。
+    # 这里直接清理，而不是恢复 LD_LIBRARY_PATH_ORIG；后者本身也可能来自上层启动器。
+    for variable in ("LD_LIBRARY_PATH", "LD_LIBRARY_PATH_ORIG", "LD_PRELOAD"):
+        environment.pop(variable, None)
 
-    # 启动器可能不传 DBUS_SESSION_BUS_ADDRESS 或 XDG_RUNTIME_DIR。
-    # 已有 session bus 地址始终优先保留；否则先用 XDG_RUNTIME_DIR，
-    # 再回退到 Linux 用户会话的标准 /run/user/$UID/bus。
-    if not environment.get("DBUS_SESSION_BUS_ADDRESS"):
-        runtime_dir_value = environment.get("XDG_RUNTIME_DIR")
-        runtime_dir = (
-            Path(runtime_dir_value)
-            if runtime_dir_value
-            else Path("/run/user") / str(os.getuid())
-        )
+    # 不信任启动器继承下来的 DBUS_SESSION_BUS_ADDRESS。
+    # 优先根据有效的 XDG_RUNTIME_DIR 重新构造；如果它不存在或无 bus，
+    # 再使用 Linux 用户会话常见的 /run/user/$UID/bus。
+    runtime_dirs: list[Path] = []
+    runtime_dir_value = environment.get("XDG_RUNTIME_DIR")
+    if runtime_dir_value:
+        runtime_dirs.append(Path(runtime_dir_value))
+
+    standard_runtime_dir = Path("/run/user") / str(os.getuid())
+    if standard_runtime_dir not in runtime_dirs:
+        runtime_dirs.append(standard_runtime_dir)
+
+    for runtime_dir in runtime_dirs:
         session_bus = runtime_dir / "bus"
-        if session_bus.is_socket():
-            environment.setdefault("XDG_RUNTIME_DIR", str(runtime_dir))
-            environment["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={session_bus}"
+        if not session_bus.is_socket():
+            continue
+        environment["XDG_RUNTIME_DIR"] = str(runtime_dir)
+        environment["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={session_bus}"
+        break
 
     return environment
 
 
 def _find_notify_send(environment: dict[str, str]) -> str | None:
-    """优先按用户 PATH 查找 notify-send，再兼容常见系统安装位置。"""
+    """优先使用宿主机系统 notify-send，再回退到用户 PATH。"""
 
-    notify_send = shutil.which("notify-send", path=environment.get("PATH"))
-    if notify_send is not None:
-        return notify_send
-
+    # 先检查宿主机常见系统位置，避免启动器/AppImage 修改 PATH 后命中其内部程序。
     for candidate in (
         Path("/usr/bin/notify-send"),
-        Path("/usr/local/bin/notify-send"),
         Path("/bin/notify-send"),
+        Path("/usr/local/bin/notify-send"),
     ):
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return str(candidate)
-    return None
+
+    return shutil.which("notify-send", path=environment.get("PATH"))
 
 
 def _notify_capture_saved(output: Path) -> None:
