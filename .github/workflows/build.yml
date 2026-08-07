@@ -7,6 +7,7 @@ on:
     paths-ignore:
       - README.md
       - README_EN.md
+      - STABLE_BASELINE_20260807.md
       - LICENSE
   workflow_dispatch:
 

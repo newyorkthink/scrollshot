@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""ScrollShot AppImage 与本地安装共用的稳定启动入口。"""
+"""ScrollShot 最终稳定启动入口（AppImage 与源码安装共用）。
+
+2026-08-07 稳定基线：保持框选、位移匹配、稳健拼接、捕获运行控制和
+Freedesktop 桌面通知的既定装配顺序。后层依赖前层的保守回退行为，
+没有完整回归检查时不要重排、合并或绕过这些包装层。
+"""
 
 from __future__ import annotations
 
@@ -30,8 +35,8 @@ def _notification_environment() -> dict[str, str]:
 
     environment = os.environ.copy()
 
-    # PyInstaller 会修改 LD_LIBRARY_PATH。调用宿主机 notify-send 时必须恢复原值，
-    # 否则系统程序可能误加载 AppImage 内的动态库并静默失败。
+    # 稳定通知基线：PyInstaller 会修改 LD_LIBRARY_PATH。调用宿主机 notify-send
+    # 时必须恢复原值，否则系统程序可能误加载 AppImage 内的动态库并静默失败。
     if getattr(sys, "frozen", False):
         original_library_path = environment.get("LD_LIBRARY_PATH_ORIG")
         if original_library_path:
@@ -39,7 +44,7 @@ def _notification_environment() -> dict[str, str]:
         else:
             environment.pop("LD_LIBRARY_PATH", None)
 
-    # 部分启动器不会传入 DBUS_SESSION_BUS_ADDRESS 或 XDG_RUNTIME_DIR。
+    # 启动器可能不传 DBUS_SESSION_BUS_ADDRESS 或 XDG_RUNTIME_DIR。
     # 已有 session bus 地址始终优先保留；否则先用 XDG_RUNTIME_DIR，
     # 再回退到 Linux 用户会话的标准 /run/user/$UID/bus。
     if not environment.get("DBUS_SESSION_BUS_ADDRESS"):
@@ -84,7 +89,7 @@ def _notify_capture_saved(output: Path) -> None:
 
     try:
         # 只使用 notify-send 最基础、兼容性最高的标题和正文参数。
-        # 不绑定 Dunst；任何实现 org.freedesktop.Notifications 的桌面通知服务均可接收。
+        # 不绑定 Dunst；任何实现 org.freedesktop.Notifications 的通知服务均可接收。
         subprocess.run(
             [
                 notify_send,
@@ -101,15 +106,20 @@ def _notify_capture_saved(output: Path) -> None:
         return
 
 
-# 稳定基线：先保存 core 原始实现，再按既定顺序叠加增强层。
-# 不要调换下面几层的顺序；后层依赖前层提供的稳定回退行为。
+# 最终稳定装配顺序（2026-08-07）：
+# 1. 框选层。
+# 2. 原始位移匹配 -> 重复布局结构校验 -> 浏览器/PDF/整窗 GUI 回退匹配。
+# 3. 原始拼接 -> 稳健拼接 -> 已知拼接点的保守清理。
+# 4. 捕获运行层。
+# 5. PNG 保存成功后的桌面通知。
+# 后层依赖前层提供的稳定回退行为，不要调换下面几层的顺序。
 _interactive_selector = create_select_region(core)
 _core_estimate_vertical_shift = core.estimate_vertical_shift
 _core_stitch_frames = core.stitch_frames
 core.select_region = _interactive_selector
 
 # 位移检测链：
-# 原始匹配 -> 重复纹理结构校验 -> 浏览器 / 整窗 GUI 保守回退匹配。
+# 原始匹配 -> 重复纹理结构校验 -> 浏览器 / PDF / 整窗 GUI 保守回退匹配。
 _structural_estimator = create_structural_estimator(
     core,
     _core_estimate_vertical_shift,
@@ -131,14 +141,16 @@ core.stitch_frames = create_seam_cleaning_stitcher(
     _resilient_stitcher,
 )
 
-# 捕获运行层统一处理自适应重叠、Esc 提前结束、工作区切换保护和底部判定。
+# 捕获运行层统一处理自适应重叠、Esc 提前结束、工作区切换保护、
+# 底部判定、普通重试和 PDF/重复版式的小步恢复。
 _capture_runner = create_capture_runner(
     core,
     effective_min_overlap,
 )
 
 
-# 捕获函数完全结束并恢复指针后，再发送“已保存”通知。
+# 只有捕获函数成功完成并返回保存路径后才发送“已保存”通知。
+# 通知失败属于附加提示失败，不能改变截图成功结果。
 def _run_capture_with_notification(args):
     result = _capture_runner(args)
     _notify_capture_saved(result[0])
