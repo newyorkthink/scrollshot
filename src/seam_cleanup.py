@@ -142,6 +142,28 @@ def _source_row_for_seam(
     return frame[source_row]
 
 
+def _edge_artifact_mask(
+    image: np.ndarray,
+    row: int,
+    *,
+    start: int,
+    end: int,
+    search_start: int,
+    search_end: int,
+) -> np.ndarray:
+    """Extend a confirmed seam repair into edge columns only where they are also anomalously dark."""
+
+    if end <= start:
+        return np.zeros(0, dtype=bool)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    reference_rows = gray[search_start:search_end, start:end]
+    if reference_rows.shape[0] < 3:
+        return np.zeros(end - start, dtype=bool)
+    reference = np.percentile(reference_rows.astype(np.float32), 75, axis=0)
+    current = gray[row, start:end].astype(np.float32)
+    return (reference - current) >= SEAM_DARK_PIXEL_DELTA
+
+
 def _repair_one_seam(
     image: np.ndarray,
     expected_row: int,
@@ -159,6 +181,13 @@ def _repair_one_seam(
     top, bottom = rows[0], rows[-1]
     if top <= 0 or bottom >= image.shape[0] - 1:
         return
+
+    height, width = image.shape[:2]
+    search_start = max(0, int(expected_row) - SEAM_SEARCH_RADIUS - SEAM_REFERENCE_RADIUS)
+    search_end = min(
+        height,
+        int(expected_row) + SEAM_SEARCH_RADIUS + SEAM_REFERENCE_RADIUS + 1,
+    )
 
     source_enabled = False
     if (
@@ -180,8 +209,28 @@ def _repair_one_seam(
     span = bottom - top + 2
 
     for index, row in enumerate(rows, start=1):
-        mask = masks[row]
-        current = image[row, left:right]
+        mask = np.zeros(width, dtype=bool)
+        mask[left:right] = masks[row]
+        if left:
+            mask[:left] = _edge_artifact_mask(
+                image,
+                row,
+                start=0,
+                end=left,
+                search_start=search_start,
+                search_end=search_end,
+            )
+        if right < width:
+            mask[right:] = _edge_artifact_mask(
+                image,
+                row,
+                start=right,
+                end=width,
+                search_start=search_start,
+                search_end=search_end,
+            )
+
+        current = image[row]
         replacement: np.ndarray | None = None
 
         if source_enabled:
@@ -196,23 +245,23 @@ def _repair_one_seam(
                 source_center = source[left:right]
                 source_gain = float(
                     np.mean(source_center.astype(np.float32))
-                    - np.mean(current.astype(np.float32))
+                    - np.mean(current[left:right].astype(np.float32))
                 )
                 if source_gain >= SEAM_SOURCE_MIN_GAIN:
-                    replacement = source_center
+                    replacement = source
 
         if replacement is None:
             alpha = index / span
             blended = before * (1.0 - alpha) + after * alpha
             replacement = np.clip(
-                np.rint(blended[left:right]),
+                np.rint(blended),
                 0,
                 255,
             ).astype(np.uint8)
 
         repaired = current.copy()
         repaired[mask] = replacement[mask]
-        image[row, left:right] = repaired
+        image[row] = repaired
 
 
 def cleanup_stitch_seams(
