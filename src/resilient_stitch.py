@@ -21,6 +21,17 @@ MOVING_RIGHT_EDGE_ROW_ERROR = 4.0
 MOVING_RIGHT_EDGE_STATIC_FRACTION = 0.68
 MOVING_RIGHT_EDGE_MIN_WIDTH = 8
 
+# Some full-window viewers draw a thin, viewport-fixed dark separator exactly
+# at the bottom edge of the scrolling pane. If that row is included in every
+# appended slice, it becomes a repeated black line in the final long image.
+# Only trim a very small bottom suffix when it is stable at the same screen
+# coordinates across frames and contains a clearly darker separator.
+STATIC_BOTTOM_MAX_ROWS = 12
+STATIC_BOTTOM_REFERENCE_ROWS = 16
+STATIC_BOTTOM_SAME_MAX_ERROR = 1.5
+STATIC_BOTTOM_DARK_DELTA = 18.0
+STATIC_BOTTOM_MIN_DYNAMIC_WIDTH = 96
+
 
 def _select_consensus_band(
     frames: Sequence[np.ndarray],
@@ -215,6 +226,94 @@ def _detect_moving_right_edge(
     return width_detected
 
 
+def _detect_fixed_bottom_trim(
+    frames: Sequence[np.ndarray],
+    matches: Sequence[object],
+    top: int,
+    bottom: int,
+    *,
+    static_left: int = 0,
+    static_right: int = 0,
+) -> int:
+    """Detect a short fixed dark separator touching the moving pane's bottom edge."""
+
+    if len(frames) < 2 or not matches:
+        return 0
+
+    height, width = frames[0].shape[:2]
+    if any(frame.shape[:2] != (height, width) for frame in frames):
+        return 0
+
+    left = max(0, min(width, int(static_left)))
+    right = max(left, min(width, width - int(static_right)))
+    if right - left < STATIC_BOTTOM_MIN_DYNAMIC_WIDTH or bottom - top < 64:
+        return 0
+
+    search_start = max(top + 16, bottom - STATIC_BOTTOM_MAX_ROWS)
+    if search_start >= bottom:
+        return 0
+
+    pair_errors: list[np.ndarray] = []
+    for previous, current in zip(frames, frames[1:]):
+        previous_rows = previous[search_start:bottom, left:right].astype(
+            np.int16,
+            copy=False,
+        )
+        current_rows = current[search_start:bottom, left:right].astype(
+            np.int16,
+            copy=False,
+        )
+        if previous_rows.shape != current_rows.shape:
+            return 0
+        pair_errors.append(
+            np.mean(np.abs(previous_rows - current_rows), axis=(1, 2))
+        )
+
+    if not pair_errors:
+        return 0
+
+    same_error = np.median(np.stack(pair_errors, axis=0), axis=0)
+    static_rows = same_error <= STATIC_BOTTOM_SAME_MAX_ERROR
+
+    suffix_start = len(static_rows)
+    for index in range(len(static_rows) - 1, -1, -1):
+        if not static_rows[index]:
+            break
+        suffix_start = index
+    if suffix_start >= len(static_rows):
+        return 0
+
+    reference_start = max(top, search_start - STATIC_BOTTOM_REFERENCE_ROWS)
+    if reference_start >= search_start:
+        return 0
+
+    reference_values: list[np.ndarray] = []
+    candidate_values: list[np.ndarray] = []
+    for frame in frames:
+        reference_values.append(
+            np.mean(
+                frame[reference_start:search_start, left:right],
+                axis=(1, 2),
+            )
+        )
+        candidate_values.append(
+            np.mean(
+                frame[search_start:bottom, left:right],
+                axis=(1, 2),
+            )
+        )
+
+    reference_luma = float(np.median(np.concatenate(reference_values)))
+    candidate_luma = np.median(np.stack(candidate_values, axis=0), axis=0)
+    suffix_luma = candidate_luma[suffix_start:]
+    if suffix_luma.size == 0:
+        return 0
+    if reference_luma - float(np.min(suffix_luma)) < STATIC_BOTTOM_DARK_DELTA:
+        return 0
+
+    return bottom - (search_start + suffix_start)
+
+
 def _side_background_profile(
     frame: np.ndarray,
     top: int,
@@ -258,23 +357,25 @@ def _stitch_with_common_band(
     *,
     static_left: int = 0,
     static_right: int = 0,
+    bottom_trim: int = 0,
 ) -> np.ndarray:
     """Stitch one moving band and avoid repeating fixed browser side columns."""
 
-    pieces: list[np.ndarray] = [frames[0][:bottom]]
-    band_height = bottom - top
+    effective_bottom = max(top + 1, bottom - max(0, int(bottom_trim)))
+    pieces: list[np.ndarray] = [frames[0][:effective_bottom]]
+    band_height = effective_bottom - top
 
     left_profile = _side_background_profile(
         frames[0],
         top,
-        bottom,
+        effective_bottom,
         0,
         static_left,
     )
     right_profile = _side_background_profile(
         frames[0],
         top,
-        bottom,
+        effective_bottom,
         frames[0].shape[1] - static_right,
         frames[0].shape[1],
     )
@@ -283,7 +384,7 @@ def _stitch_with_common_band(
         shift = int(match.shift)
         if shift <= 0 or shift >= band_height:
             raise ValueError("consensus band cannot contain detected shift")
-        piece = frame[bottom - shift : bottom]
+        piece = frame[effective_bottom - shift : effective_bottom]
         piece = _mask_static_sides(
             piece,
             left=static_left,
@@ -293,7 +394,7 @@ def _stitch_with_common_band(
         )
         pieces.append(piece)
 
-    pieces.append(frames[-1][bottom:])
+    pieces.append(frames[-1][effective_bottom:])
     non_empty = [piece for piece in pieces if piece.size]
     return np.ascontiguousarray(np.concatenate(non_empty, axis=0))
 
@@ -324,6 +425,7 @@ def create_resilient_stitcher(
 
         selected_band: tuple[int, int] | None = None
         static_sides = (0, 0)
+        bottom_trim = 0
         if matches:
             height, width = frames[0].shape[:2]
             if all(frame.shape[:2] == (height, width) for frame in frames):
@@ -345,6 +447,14 @@ def create_resilient_stitcher(
                     max(static_sides[1], moving_right),
                 )
                 if any(static_sides):
+                    bottom_trim = _detect_fixed_bottom_trim(
+                        frames,
+                        matches,
+                        selected_band[0],
+                        selected_band[1],
+                        static_left=static_sides[0],
+                        static_right=static_sides[1],
+                    )
                     try:
                         return _stitch_with_common_band(
                             frames,
@@ -353,6 +463,7 @@ def create_resilient_stitcher(
                             selected_band[1],
                             static_left=static_sides[0],
                             static_right=static_sides[1],
+                            bottom_trim=bottom_trim,
                         )
                     except ValueError:
                         pass
@@ -392,6 +503,15 @@ def create_resilient_stitcher(
                 static_sides[0],
                 max(static_sides[1], moving_right),
             )
+        if any(static_sides) and not bottom_trim:
+            bottom_trim = _detect_fixed_bottom_trim(
+                frames,
+                matches,
+                top,
+                bottom,
+                static_left=static_sides[0],
+                static_right=static_sides[1],
+            )
         try:
             return _stitch_with_common_band(
                 frames,
@@ -400,6 +520,7 @@ def create_resilient_stitcher(
                 bottom,
                 static_left=static_sides[0],
                 static_right=static_sides[1],
+                bottom_trim=bottom_trim,
             )
         except ValueError:
             raw_shifts = [int(match.shift) for match in matches]
