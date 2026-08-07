@@ -89,6 +89,9 @@ jobs:
           ln -s usr/share/icons/hicolor/scalable/apps/scrollshot.svg ScrollShot.AppDir/scrollshot.svg
           ln -s scrollshot.svg ScrollShot.AppDir/.DirIcon
           desktop-file-validate ScrollShot.AppDir/scrollshot.desktop
+          grep -Fx 'StartupWMClass=ScrollShot' ScrollShot.AppDir/scrollshot.desktop
+          test -L ScrollShot.AppDir/.DirIcon
+          test -s ScrollShot.AppDir/usr/share/icons/hicolor/scalable/apps/scrollshot.svg
           test -x ScrollShot.AppDir/AppRun
           test -x ScrollShot.AppDir/usr/lib/scrollshot/scrollshot
 
@@ -109,11 +112,11 @@ jobs:
             "dist/${APPIMAGE_NAME}"
           chmod +x "dist/${APPIMAGE_NAME}"
 
-      - name: Test AppImage with fixed window regions
+      - name: Test AppImage with fixed and short regions
         run: |
           APPIMAGE_EXTRACT_AND_RUN=1 "dist/${APPIMAGE_NAME}" --version | grep -F 'ScrollShot 0.2.0'
           file "dist/${APPIMAGE_NAME}" | grep -F 'ELF 64-bit'
-          rm -f /tmp/scrollshot-ci.png
+          rm -f /tmp/scrollshot-ci.png /tmp/scrollshot-short-ci.png
           xvfb-run -a -s "-screen 0 800x600x24" bash -c '
             set -euo pipefail
             .venv/bin/python tests/x11_demo.py &
@@ -127,6 +130,13 @@ jobs:
               --max-frames 30 \
               --stable-rounds 2 \
               --output /tmp/scrollshot-ci.png
+            APPIMAGE_EXTRACT_AND_RUN=1 dist/scrollshot.AppImage \
+              --geometry 0,0,320,64 \
+              --delay 0.1 \
+              --settle-delay 0.1 \
+              --max-frames 2 \
+              --stable-rounds 1 \
+              --output /tmp/scrollshot-short-ci.png
           '
           .venv/bin/python - <<'PY'
           import cv2
@@ -135,6 +145,10 @@ jobs:
           assert image is not None
           assert image.shape[1] == 420, image.shape
           assert image.shape[0] > 450, image.shape
+
+          short_image = cv2.imread("/tmp/scrollshot-short-ci.png")
+          assert short_image is not None
+          assert short_image.shape[:2] == (64, 320), short_image.shape
           PY
 
       - name: Generate checksum

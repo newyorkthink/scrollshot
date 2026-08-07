@@ -10,3 +10,4 @@ Terminal=false
 Categories=Graphics;Utility;
 Keywords=screenshot;scrolling;capture;X11;
 StartupNotify=false
+StartupWMClass=ScrollShot

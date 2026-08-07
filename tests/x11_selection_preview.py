@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""验证 X11 框选预览、像素放大镜与鼠标框选。"""
+"""验证 X11 框选预览、跟随鼠标的放大镜、十字线与鼠标框选。"""
 
 from __future__ import annotations
 
@@ -21,14 +21,12 @@ scrollshot = importlib.util.module_from_spec(CORE_SPEC)
 sys.modules[CORE_SPEC.name] = scrollshot
 CORE_SPEC.loader.exec_module(scrollshot)
 
-UI_SPEC = importlib.util.spec_from_file_location(
-    "selection_ui", ROOT / "src" / "selection_ui.py"
-)
-assert UI_SPEC is not None and UI_SPEC.loader is not None
-selection_ui = importlib.util.module_from_spec(UI_SPEC)
-sys.modules[UI_SPEC.name] = selection_ui
-UI_SPEC.loader.exec_module(selection_ui)
-select_region = selection_ui.create_select_region(scrollshot)
+sys.path.insert(0, str(ROOT / "src"))
+import pointer_guides
+import selection_guides
+import selection_ui
+
+select_region = selection_guides.create_select_region(scrollshot)
 
 root = tk.Tk()
 root.geometry("640x420+40+40")
@@ -76,6 +74,26 @@ edge_magnified = selection_ui.build_magnifier_frame(
 assert edge_magnified.shape == (15, 15, 3), edge_magnified.shape
 assert np.all(edge_magnified[0:9, 0:9] == synthetic[0, 0])
 
+near_pointer = pointer_guides.position_floating_panel(
+    100,
+    120,
+    184,
+    214,
+    800,
+    600,
+)
+assert near_pointer == (128, 148), near_pointer
+
+flipped_at_edge = pointer_guides.position_floating_panel(
+    780,
+    580,
+    184,
+    214,
+    800,
+    600,
+)
+assert flipped_at_edge == (568, 338), flipped_at_edge
+
 
 def perform_drag() -> None:
     time.sleep(0.8)
@@ -101,4 +119,4 @@ region = select_region()
 drag_thread.join(timeout=2)
 
 assert region == scrollshot.Region(100, 120, 420, 300), region
-print("selection preview and magnifier smoke test passed")
+print("selection preview, crosshair and pointer-following magnifier smoke test passed")

@@ -12,9 +12,12 @@ sudo apt-get install -y python3 python3-numpy python3-opencv python3-xlib python
 # 创建当前用户的可执行文件目录与 ScrollShot 模块目录
 install -d -m 0755 "${INSTALL_BIN_DIR}" "${INSTALL_LIB_DIR}"
 
-# 安装 ScrollShot 核心模块与 X11 框选模块
+# 安装 ScrollShot 核心模块、捕获参数模块、指针辅助模块与 X11 框选模块
 install -m 0644 "${SCRIPT_DIR}/src/scrollshot.py" "${INSTALL_LIB_DIR}/scrollshot.py"
+install -m 0644 "${SCRIPT_DIR}/src/capture_options.py" "${INSTALL_LIB_DIR}/capture_options.py"
+install -m 0644 "${SCRIPT_DIR}/src/pointer_guides.py" "${INSTALL_LIB_DIR}/pointer_guides.py"
 install -m 0644 "${SCRIPT_DIR}/src/selection_ui.py" "${INSTALL_LIB_DIR}/selection_ui.py"
+install -m 0644 "${SCRIPT_DIR}/src/selection_guides.py" "${INSTALL_LIB_DIR}/selection_guides.py"
 
 # 安装启动入口，运行时自动加载 ~/.local/lib/scrollshot 中的模块
 install -m 0755 "${SCRIPT_DIR}/src/scrollshot_app.py" "${TARGET}"
