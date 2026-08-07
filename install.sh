@@ -19,11 +19,14 @@ install -m 0644 "${SCRIPT_DIR}/src/pointer_guides.py" "${INSTALL_LIB_DIR}/pointe
 install -m 0644 "${SCRIPT_DIR}/src/selection_ui.py" "${INSTALL_LIB_DIR}/selection_ui.py"
 install -m 0644 "${SCRIPT_DIR}/src/selection_guides.py" "${INSTALL_LIB_DIR}/selection_guides.py"
 
-# 安装用于排除重复条纹误匹配的结构特征校验模块
+# 安装结构匹配、浏览器回退匹配、稳健拼接与拼接线清理模块
 install -m 0644 "${SCRIPT_DIR}/src/structural_match.py" "${INSTALL_LIB_DIR}/structural_match.py"
-
-# 安装浏览器等动态滚动布局的稳健拼接回退模块
+install -m 0644 "${SCRIPT_DIR}/src/fallback_match.py" "${INSTALL_LIB_DIR}/fallback_match.py"
 install -m 0644 "${SCRIPT_DIR}/src/resilient_stitch.py" "${INSTALL_LIB_DIR}/resilient_stitch.py"
+install -m 0644 "${SCRIPT_DIR}/src/seam_cleanup.py" "${INSTALL_LIB_DIR}/seam_cleanup.py"
+
+# 安装捕获运行控制模块，提供浏览器加载重试与滚动过程中 Esc 提前结束保存
+install -m 0644 "${SCRIPT_DIR}/src/capture_runtime.py" "${INSTALL_LIB_DIR}/capture_runtime.py"
 
 # 安装启动入口，运行时自动加载 ~/.local/lib/scrollshot 中的模块
 install -m 0755 "${SCRIPT_DIR}/src/scrollshot_app.py" "${TARGET}"
