@@ -13,6 +13,8 @@ from typing import Callable
 
 import cv2
 
+from selection_ui import read_current_desktop
+
 BOTTOM_GRACE_DELAY = 1.0
 MATCH_RETRY_DELAY = 0.30
 MATCH_RETRY_ROUNDS = 2
@@ -118,6 +120,15 @@ class CaptureStopMonitor:
             self.display.close()
 
 
+def _read_current_desktop_safely() -> int | None:
+    """Return the current EWMH workspace when available without making capture depend on it."""
+
+    try:
+        return read_current_desktop()
+    except Exception:
+        return None
+
+
 def create_capture_runner(
     core: ModuleType,
     effective_min_overlap: Callable[[int, int], int],
@@ -141,6 +152,8 @@ def create_capture_runner(
         stable_rounds = 0
         stop_requested = False
         stop_monitor: CaptureStopMonitor | None = None
+        capture_desktop = _read_current_desktop_safely()
+        workspace_invalidated = False
 
         def request_stop(_signum, _frame) -> None:
             nonlocal stop_requested
@@ -148,6 +161,15 @@ def create_capture_runner(
 
         def should_stop() -> bool:
             return stop_requested or bool(stop_monitor and stop_monitor.requested)
+
+        def workspace_changed() -> bool:
+            nonlocal workspace_invalidated
+            if workspace_invalidated or capture_desktop is None:
+                return workspace_invalidated
+            current_desktop = _read_current_desktop_safely()
+            if current_desktop is not None and current_desktop != capture_desktop:
+                workspace_invalidated = True
+            return workspace_invalidated
 
         def wait_or_stop(seconds: float) -> bool:
             if should_stop():
@@ -162,7 +184,11 @@ def create_capture_runner(
         try:
             controller.move_to_region(region)
             time.sleep(args.settle_delay)
+            if workspace_changed():
+                raise core.CaptureError("workspace changed before capture started")
             first = controller.capture(region)
+            if workspace_changed():
+                raise core.CaptureError("workspace changed while capturing the first frame")
             frames.append(first)
             if debug_dir:
                 cv2.imwrite(str(debug_dir / "frame-000.png"), first)
@@ -173,15 +199,17 @@ def create_capture_runner(
                 stop_monitor = None
 
             for frame_index in range(1, args.max_frames):
-                if should_stop():
+                if should_stop() or workspace_changed():
                     break
 
                 controller.move_to_region(region)
                 controller.scroll_down(args.scroll_ticks)
-                if wait_or_stop(args.delay):
+                if wait_or_stop(args.delay) or workspace_changed():
                     break
 
                 current = controller.capture(region)
+                if workspace_changed():
+                    break
                 if debug_dir:
                     cv2.imwrite(str(debug_dir / f"frame-{frame_index:03d}.png"), current)
 
@@ -190,9 +218,11 @@ def create_capture_runner(
                     stable_rounds += 1
                     if stable_rounds >= args.stable_rounds:
                         grace = max(BOTTOM_GRACE_DELAY, float(args.delay))
-                        if wait_or_stop(grace):
+                        if wait_or_stop(grace) or workspace_changed():
                             break
                         late = controller.capture(region)
+                        if workspace_changed():
+                            break
                         if core.frames_are_stable(current, late):
                             break
                         frames[-1] = late
@@ -209,11 +239,13 @@ def create_capture_runner(
 
                 retry_frame = current
                 for _ in range(MATCH_RETRY_ROUNDS):
-                    if match is not None or should_stop():
+                    if match is not None or should_stop() or workspace_changed():
                         break
-                    if wait_or_stop(max(MATCH_RETRY_DELAY, float(args.settle_delay))):
+                    if wait_or_stop(max(MATCH_RETRY_DELAY, float(args.settle_delay))) or workspace_changed():
                         break
                     retry_frame = controller.capture(region)
+                    if workspace_changed():
+                        break
                     match = core.estimate_vertical_shift(
                         previous,
                         retry_frame,
@@ -221,7 +253,7 @@ def create_capture_runner(
                         score_threshold=args.match_threshold,
                     )
 
-                if should_stop():
+                if should_stop() or workspace_changed():
                     break
                 if match is None:
                     break
