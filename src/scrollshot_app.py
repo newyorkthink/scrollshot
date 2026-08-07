@@ -39,14 +39,20 @@ def _notification_environment() -> dict[str, str]:
         else:
             environment.pop("LD_LIBRARY_PATH", None)
 
-    # 部分启动器不会传入 DBUS_SESSION_BUS_ADDRESS。现代 Linux 用户会话通常
-    # 在 $XDG_RUNTIME_DIR/bus 提供标准 session bus；已有地址始终优先保留。
+    # 部分启动器不会传入 DBUS_SESSION_BUS_ADDRESS 或 XDG_RUNTIME_DIR。
+    # 已有 session bus 地址始终优先保留；否则先用 XDG_RUNTIME_DIR，
+    # 再回退到 Linux 用户会话的标准 /run/user/$UID/bus。
     if not environment.get("DBUS_SESSION_BUS_ADDRESS"):
-        runtime_dir = environment.get("XDG_RUNTIME_DIR")
-        if runtime_dir:
-            session_bus = Path(runtime_dir) / "bus"
-            if session_bus.exists():
-                environment["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={session_bus}"
+        runtime_dir_value = environment.get("XDG_RUNTIME_DIR")
+        runtime_dir = (
+            Path(runtime_dir_value)
+            if runtime_dir_value
+            else Path("/run/user") / str(os.getuid())
+        )
+        session_bus = runtime_dir / "bus"
+        if session_bus.is_socket():
+            environment.setdefault("XDG_RUNTIME_DIR", str(runtime_dir))
+            environment["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={session_bus}"
 
     return environment
 
