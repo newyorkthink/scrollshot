@@ -10,12 +10,23 @@ import time
 import tkinter as tk
 from pathlib import Path
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "src" / "scrollshot.py"
-SPEC = importlib.util.spec_from_file_location("scrollshot", MODULE_PATH)
-assert SPEC is not None and SPEC.loader is not None
-scrollshot = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = scrollshot
-SPEC.loader.exec_module(scrollshot)
+ROOT = Path(__file__).resolve().parents[1]
+CORE_SPEC = importlib.util.spec_from_file_location(
+    "scrollshot", ROOT / "src" / "scrollshot.py"
+)
+assert CORE_SPEC is not None and CORE_SPEC.loader is not None
+scrollshot = importlib.util.module_from_spec(CORE_SPEC)
+sys.modules[CORE_SPEC.name] = scrollshot
+CORE_SPEC.loader.exec_module(scrollshot)
+
+UI_SPEC = importlib.util.spec_from_file_location(
+    "selection_ui", ROOT / "src" / "selection_ui.py"
+)
+assert UI_SPEC is not None and UI_SPEC.loader is not None
+selection_ui = importlib.util.module_from_spec(UI_SPEC)
+sys.modules[UI_SPEC.name] = selection_ui
+UI_SPEC.loader.exec_module(selection_ui)
+select_region = selection_ui.create_select_region(scrollshot)
 
 root = tk.Tk()
 root.geometry("640x420+40+40")
@@ -63,7 +74,7 @@ def perform_drag() -> None:
 
 drag_thread = threading.Thread(target=perform_drag, daemon=True)
 drag_thread.start()
-region = scrollshot.select_region()
+region = select_region()
 drag_thread.join(timeout=2)
 
 assert region == scrollshot.Region(100, 120, 420, 300), region

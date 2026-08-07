@@ -45,16 +45,18 @@ jobs:
 
       - name: Check Python syntax
         run: |
-          .venv/bin/python -m py_compile src/scrollshot.py tests/*.py
+          .venv/bin/python -m py_compile src/*.py tests/*.py
 
       - name: Run unit tests
         run: |
           .venv/bin/python -m unittest discover -s tests -v
 
-      - name: Test selection preview in X11
+      - name: Test selection preview and X11 input handling
         run: |
           xvfb-run -a -s "-screen 0 800x600x24" \
             .venv/bin/python tests/x11_selection_preview.py
+          xvfb-run -a -s "-screen 0 800x600x24" \
+            .venv/bin/python tests/x11_selection_input.py
 
       - name: Build bundled application directory
         run: |
@@ -65,7 +67,7 @@ jobs:
             --name scrollshot \
             --hidden-import tkinter \
             --hidden-import Xlib.ext.xtest \
-            src/scrollshot.py
+            src/scrollshot_app.py
           test -x dist/scrollshot/scrollshot
 
       - name: Assemble AppDir

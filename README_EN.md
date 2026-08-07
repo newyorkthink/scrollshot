@@ -7,6 +7,8 @@ ScrollShot is a scrolling screenshot AppImage for **Linux X11**. It automaticall
 ## Features
 
 - Select any rectangular area with the mouse
+- Switch i3 or other EWMH workspaces during selection; the preview refreshes automatically
+- Cancel with a global X11 `Esc` listener that does not depend on overlay keyboard focus
 - Display a desktop preview during selection without relying on window transparency
 - Detect scrolling content separately from fixed headers and footers
 - Keep fixed toolbars and buttons only once in the final image
@@ -45,12 +47,13 @@ chmod +x scrollshot.AppImage
 
 Procedure:
 
-1. Drag to select the area that actually scrolls.
-2. Do not move or cover the target after releasing the mouse button.
-3. ScrollShot scrolls, detects fixed regions, and stitches the frames.
-4. The PNG is saved to `~/Pictures/` by default.
+1. After launch, use i3 workspace shortcuts to move to the target workspace; the selection preview refreshes automatically.
+2. Drag to select the area that actually scrolls.
+3. Do not move or cover the target after releasing the mouse button.
+4. ScrollShot scrolls, detects fixed regions, and stitches the frames.
+5. The PNG is saved to `~/Pictures/` by default.
 
-Press `Esc` to cancel selection. During capture, press `Ctrl+C` in the launching terminal to save the completed portion.
+Press `Esc` to cancel selection regardless of keyboard focus. During capture, press `Ctrl+C` in the launching terminal to save the completed portion.
 
 ## Common options
 
@@ -101,7 +104,7 @@ The `Build ScrollShot AppImage` workflow runs for every commit pushed to `main`,
 It performs:
 
 1. Python syntax checks and unit tests.
-2. Xvfb selection-preview tests.
+2. Xvfb selection-preview, global `Esc`, and workspace-switching tests.
 3. Fixed-header and fixed-footer scrolling-window tests.
 4. PyInstaller build and AppDir assembly.
 5. AppImage creation with `appimagetool`.
