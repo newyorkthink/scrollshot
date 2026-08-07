@@ -7,6 +7,7 @@ import unittest
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+import cv2
 import numpy as np
 
 from resilient_stitch import create_resilient_stitcher
@@ -38,6 +39,58 @@ def build_frame(
         start : start + content_height
     ]
     frame[-footer_height:] = (210, 220, 230)
+    return frame
+
+
+def build_browser_frame_with_fixed_sides(
+    document: np.ndarray,
+    start: int,
+    *,
+    viewport_height: int = 720,
+    width: int = 1000,
+    left_width: int = 180,
+    right_width: int = 24,
+    header_height: int = 80,
+    footer_height: int = 60,
+) -> np.ndarray:
+    content_height = viewport_height - header_height - footer_height
+    frame = np.full((viewport_height, width, 3), 245, dtype=np.uint8)
+    frame[:header_height] = (25, 30, 40)
+    frame[-footer_height:] = (230, 232, 235)
+
+    frame[header_height : viewport_height - footer_height, :left_width] = (
+        248,
+        248,
+        248,
+    )
+    for index, y in enumerate(
+        range(header_height + 24, viewport_height - footer_height, 38)
+    ):
+        cv2.putText(
+            frame,
+            f"item {index:02d}",
+            (12, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (35, 35, 35),
+            1,
+            cv2.LINE_AA,
+        )
+    frame[:, left_width - 1 : left_width + 1] = (205, 205, 205)
+
+    frame[
+        header_height : viewport_height - footer_height,
+        left_width : width - right_width,
+    ] = document[start : start + content_height]
+
+    frame[:, width - right_width :] = (250, 250, 250)
+    cv2.rectangle(
+        frame,
+        (width - 10, 140),
+        (width - 6, 260),
+        (180, 180, 180),
+        -1,
+    )
     return frame
 
 
@@ -84,6 +137,73 @@ class ResilientStitchTests(unittest.TestCase):
         self.assertEqual(stitched.shape[:2], (720 + sum(shifts), 320))
         np.testing.assert_array_equal(stitched[:660], frames[0][:660])
         np.testing.assert_array_equal(stitched[-60:], frames[-1][-60:])
+
+    def test_fixed_browser_sidebars_are_not_repeated(self) -> None:
+        rng = np.random.default_rng(20260807)
+        document = rng.integers(
+            0,
+            255,
+            size=(2400, 796, 3),
+            dtype=np.uint8,
+        )
+        shifts = [180, 170, 95]
+        starts = [0, 180, 350, 445]
+        frames = [
+            build_browser_frame_with_fixed_sides(document, start)
+            for start in starts
+        ]
+        matches = [
+            ShiftMatch(shift, content_top=80, content_bottom=660)
+            for shift in shifts
+        ]
+
+        def baseline(frames, shifts):
+            pieces = [frames[0][:660]]
+            for frame, match in zip(frames[1:], shifts):
+                pieces.append(frame[660 - int(match.shift) : 660])
+            pieces.append(frames[-1][660:])
+            return np.ascontiguousarray(np.concatenate(pieces, axis=0))
+
+        core = SimpleNamespace(ShiftMatch=ShiftMatch)
+        wrapper = create_resilient_stitcher(core, baseline)
+        stitched = wrapper(frames, matches)
+        repeated = baseline(frames, matches)
+
+        self.assertEqual(stitched.shape[:2], (720 + sum(shifts), 1000))
+        np.testing.assert_array_equal(
+            stitched[:, 180:-24],
+            repeated[:, 180:-24],
+        )
+
+        appended_start = 660
+        appended_end = appended_start + sum(shifts)
+        left_profile = np.rint(
+            np.median(frames[0][80:660, :180], axis=0)
+        ).astype(np.uint8)
+        right_profile = np.rint(
+            np.median(frames[0][80:660, -24:], axis=0)
+        ).astype(np.uint8)
+
+        np.testing.assert_array_equal(
+            stitched[appended_start:appended_end, :180],
+            np.broadcast_to(
+                left_profile,
+                (sum(shifts), 180, 3),
+            ),
+        )
+        np.testing.assert_array_equal(
+            stitched[appended_start:appended_end, -24:],
+            np.broadcast_to(
+                right_profile,
+                (sum(shifts), 24, 3),
+            ),
+        )
+        self.assertFalse(
+            np.array_equal(
+                stitched[appended_start:appended_end, :180],
+                repeated[appended_start:appended_end, :180],
+            )
+        )
 
     def test_non_recoverable_programming_error_is_not_hidden(self) -> None:
         core = SimpleNamespace(ShiftMatch=ShiftMatch)

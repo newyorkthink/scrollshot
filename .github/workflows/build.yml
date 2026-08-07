@@ -194,7 +194,7 @@ jobs:
               "dist/${APPIMAGE_NAME}.sha256" \
               --clobber
             gh release edit "${RELEASE_TAG}" \
-              --title "ScrollShot Latest" \
+              --title "latest" \
               --notes "${release_notes}" \
               --latest
           else
@@ -202,7 +202,7 @@ jobs:
               "dist/${APPIMAGE_NAME}" \
               "dist/${APPIMAGE_NAME}.sha256" \
               --target "${GITHUB_SHA}" \
-              --title "ScrollShot Latest" \
+              --title "latest" \
               --notes "${release_notes}" \
               --latest
           fi
