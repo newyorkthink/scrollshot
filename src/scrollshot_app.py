@@ -12,16 +12,22 @@ if local_library.is_dir():
 
 import scrollshot as core
 from capture_options import effective_min_overlap
+from resilient_stitch import create_resilient_stitcher
 from selection_guides import create_select_region
 from structural_match import create_structural_estimator
 
 _interactive_selector = create_select_region(core)
 _core_run_capture = core.run_capture
 _core_estimate_vertical_shift = core.estimate_vertical_shift
+_core_stitch_frames = core.stitch_frames
 core.select_region = _interactive_selector
 core.estimate_vertical_shift = create_structural_estimator(
     core,
     _core_estimate_vertical_shift,
+)
+core.stitch_frames = create_resilient_stitcher(
+    core,
+    _core_stitch_frames,
 )
 
 
