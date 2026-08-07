@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import os
 import select
 import signal
+import sys
 import threading
 import time
 from pathlib import Path
@@ -18,6 +20,8 @@ from selection_ui import read_current_desktop
 BOTTOM_GRACE_DELAY = 1.0
 MATCH_RETRY_DELAY = 0.30
 MATCH_RETRY_ROUNDS = 2
+MATCH_SCROLL_RECOVERY_ROUNDS = 2
+MATCH_SCROLL_RECOVERY_MIN_HEIGHT = 160
 
 
 class CaptureStopMonitor:
@@ -127,6 +131,21 @@ def _read_current_desktop_safely() -> int | None:
         return read_current_desktop()
     except Exception:
         return None
+
+
+def _restore_system_subprocess_environment() -> None:
+    """Restore the host library path before the launcher invokes system tools."""
+
+    if not getattr(sys, "frozen", False):
+        return
+
+    # PyInstaller 会把自身目录放进 LD_LIBRARY_PATH。截图完成后恢复宿主机原值，
+    # 避免后续 notify-send 等系统程序错误加载 AppImage 内的动态库。
+    original = os.environ.get("LD_LIBRARY_PATH_ORIG")
+    if original is not None:
+        os.environ["LD_LIBRARY_PATH"] = original
+    else:
+        os.environ.pop("LD_LIBRARY_PATH", None)
 
 
 def create_capture_runner(
@@ -253,6 +272,48 @@ def create_capture_runner(
                         score_threshold=args.match_threshold,
                     )
 
+                # PDF 双页/整窗等重复布局可能让某一轮重叠匹配暂时无解。
+                # 不立即结束整次截图；仅在较高选区里小步继续滚动两次，
+                # 始终用最后一个已确认帧做锚点，匹配成功后再接入拼接链。
+                if (
+                    match is None
+                    and region.height >= MATCH_SCROLL_RECOVERY_MIN_HEIGHT
+                    and not should_stop()
+                    and not workspace_changed()
+                ):
+                    for recovery_index in range(MATCH_SCROLL_RECOVERY_ROUNDS):
+                        controller.move_to_region(region)
+                        controller.scroll_down(1)
+                        if wait_or_stop(args.delay) or workspace_changed():
+                            break
+
+                        recovery_frame = controller.capture(region)
+                        if workspace_changed():
+                            break
+                        if debug_dir:
+                            cv2.imwrite(
+                                str(
+                                    debug_dir
+                                    / f"frame-{frame_index:03d}-recovery-{recovery_index + 1}.png"
+                                ),
+                                recovery_frame,
+                            )
+
+                        match = core.estimate_vertical_shift(
+                            previous,
+                            recovery_frame,
+                            min_overlap=args.min_overlap,
+                            score_threshold=args.match_threshold,
+                        )
+                        if match is not None:
+                            retry_frame = recovery_frame
+                            break
+
+                        if core.frames_are_stable(retry_frame, recovery_frame):
+                            retry_frame = recovery_frame
+                            break
+                        retry_frame = recovery_frame
+
                 if should_stop() or workspace_changed():
                     break
                 if match is None:
@@ -264,6 +325,9 @@ def create_capture_runner(
 
             stitched = core.stitch_frames(frames, matches)
             core.save_png(output, stitched)
+
+            # 后续启动入口会调用系统 notify-send；冻结环境先恢复宿主机动态库路径。
+            _restore_system_subprocess_environment()
             return output, len(frames), stitched.shape[0]
         finally:
             signal.signal(signal.SIGINT, previous_sigint)
