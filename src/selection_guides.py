@@ -112,8 +112,8 @@ def create_select_region(core: ModuleType) -> Callable[[], object]:
             screen_width // 2,
             37,
             text=(
-                "十字线精确定位 · 放大镜跟随鼠标 · Esc 取消 · 可切换 i3 工作区 / "
-                "Crosshair · pointer-following magnifier · Esc cancels"
+                "十字线精确定位 · 放大镜跟随鼠标 · Esc 取消 · 可切换工作区 / "
+                "Crosshair · pointer-following magnifier · Esc cancels · workspace switching"
             ),
             fill="white",
             font=("Sans", 13, "bold"),
