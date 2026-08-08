@@ -8,16 +8,18 @@
 
 ScrollShot is a scrolling screenshot AppImage for **Linux X11**. It automatically scrolls browsers, Dolphin/settings-style windows, PDF viewers, and other scrollable regions, detects overlap, and stitches the confirmed frames into a PNG.
 
-> **Final stable baseline: 2026-08-07**
+> **Final stable baseline: 2026-08-09**
 >
-> The validated runtime anchor is `b5b22693197010e6b30490df6f2a2300f9c93b11`. This version has been manually validated for Dolphin, browser, PDF/full-window GUI, i3/EWMH, `Esc`/`Ctrl+C`, workspace protection, and desktop notifications when launched both from a normal terminal and from Kando.
+> The validated runtime anchor is `0c290f2920818c55da5e3860310007096b0a0908`. On top of the previously validated Dolphin, browser, PDF/full-window GUI, i3/EWMH, `Esc`/`Ctrl+C`, workspace-protection, and Kando-notification behavior, this version adds a browser-safe wheel target: before wheel input, the pointer is moved to roughly 85% across and 60% down the selected region. This avoids common center-page videos and top-corner floating videos while preserving the established `move_to_region()` controller interface.
 >
-> Later documentation-only cleanup does not change this validated runtime behavior. Detailed maintenance notes: [`STABLE_BASELINE_20260807.md`](STABLE_BASELINE_20260807.md).
+> The `latest` Release contains this runtime logic and has been manually validated with a long YouTube watch-page capture. Documentation-only cleanup after this point does not change the validated runtime. Detailed maintenance notes: [`STABLE_BASELINE_20260807.md`](STABLE_BASELINE_20260807.md).
 
 ## Validated stable state
 
 - Long Dolphin lists can be continuously scrolled and stitched.
 - Browser/web captures can continue through long content while fixed sidebars and the right-edge scrollbar are not repeatedly appended.
+- A YouTube watch page has been manually captured as a long screenshot: the center video no longer receives the wheel input instead of the page.
+- Browser wheel input is sent from a safe interior point near X=85%, Y=60% to avoid center-page videos, maps, canvases, and common top-corner floating videos.
 - PDF/full-window GUI captures continue through temporary ambiguous overlap rounds by using limited small-step recovery instead of ending after a single failed match.
 - PDF/full-window GUI stitching includes conservative handling for multi-row seams, fixed viewport borders, and repeated dark separator lines.
 - i3/EWMH workspace shortcuts remain available during selection, and `Esc` does not depend on the overlay owning keyboard focus.
@@ -54,7 +56,7 @@ Procedure:
 2. Use the full-screen crosshair and pointer-following pixel magnifier for alignment.
 3. Drag to select the actual scrolling region.
 4. After releasing the mouse button, do not move or cover the target, change zoom, or switch tabs.
-5. ScrollShot automatically scrolls, matches, and stitches. Browsers and PDF/full-window GUI captures use the established conservative fallback paths when needed.
+5. ScrollShot automatically scrolls, matches, and stitches. Before scrolling, it moves the pointer to the safe right/middle-lower target. Browsers and PDF/full-window GUI captures use the established conservative fallback paths when needed.
 6. The PNG is saved to `~/Pictures/` by default, then a desktop notification is sent automatically.
 
 ## Kando / other launchers
@@ -90,6 +92,7 @@ This launch path has been manually validated: after the PNG is saved, ScrollShot
 - The overlay stays non-focusable and grabs only unmodified `Esc`, leaving shortcuts such as `Alt+1` and `Alt+A` available.
 - Internal overlap is adapted to the selected height so short selections remain supported.
 - Scrolling content is separated from fixed headers and footers.
+- Before wheel input, the pointer is automatically moved to roughly X=85%, Y=60% of the selection to reduce browser video/map/canvas wheel interception.
 - A conservative browser fallback matcher is used when the primary matcher is unreliable.
 - A temporary failed overlap round can use limited small-step recovery from the last confirmed frame.
 - Fixed browser sidebars and the right-edge scrollbar are detected to avoid repeated append artifacts.
@@ -136,9 +139,9 @@ Run in a **Linux X11 graphical terminal**:
 
 - x86_64 Linux.
 - An X11 graphical session; native Wayland sessions are not supported.
-- The center of the selected region must accept mouse-wheel input.
+- Wheel input is normally sent from the safe target near X=85%, Y=60% of the selected region. That point must still pass wheel input to the intended scrolling container; a special control covering and intercepting that exact point can still prevent page scrolling.
 - Select the actual scrolling content and avoid unrelated windows.
-- Video, continuous animation, large flashing areas, or unusual overlays may reduce overlap reliability.
+- Video, continuous animation, large flashing areas, or unusual overlays may still reduce overlap reliability. A fixed/floating video near the top is normally not repeatedly appended into every stitched segment, but its changing image can still make overlap detection harder.
 - Desktop notification requires a host `notify-send` client and a working Freedesktop notification service; notification failure does not affect the PNG.
 - Before calling the host `notify-send`, ScrollShot removes launcher/AppImage-provided `LD_LIBRARY_PATH`, `LD_LIBRARY_PATH_ORIG`, and `LD_PRELOAD`; the notification D-Bus address is rebuilt from a valid `$XDG_RUNTIME_DIR/bus`, with `/run/user/$UID/bus` as the fallback.
 
@@ -154,7 +157,7 @@ selection layer
   -> original stitcher
   -> resilient stitching (fixed sidebars / scrollbar / PDF fixed borders)
   -> conservative seam cleanup
-  -> capture runtime (Esc / workspace protection / bottom detection / match recovery)
+  -> capture runtime (safe wheel target / Esc / workspace protection / bottom detection / match recovery)
   -> post-save desktop notification
 ```
 
@@ -166,7 +169,7 @@ See [`STABLE_BASELINE_20260807.md`](STABLE_BASELINE_20260807.md) for module resp
 
 The workflow performs:
 
-1. Python syntax checks and unit tests, including a launcher/Kando-style notification-environment regression test for session-bus reconstruction.
+1. Python syntax checks and unit tests, including capture-runtime controller-interface, workspace-protection, and launcher/Kando-style notification-environment regressions.
 2. Xvfb selection-preview, full-screen crosshair, pointer-following magnifier, Alt-shortcut availability, rapid workspace switching, focus-preservation, and global `Esc` tests.
 3. Fixed-header/footer, repetitive-layout, browser/PDF fallback-stitching, and short-region regression tests.
 4. PyInstaller build and AppDir assembly, including desktop-file, icon, and launcher checks.
