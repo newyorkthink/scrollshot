@@ -22,6 +22,8 @@ MATCH_RETRY_DELAY = 0.30
 MATCH_RETRY_ROUNDS = 2
 MATCH_SCROLL_RECOVERY_ROUNDS = 2
 MATCH_SCROLL_RECOVERY_MIN_HEIGHT = 160
+SCROLL_TARGET_X_RATIO = 0.85
+SCROLL_TARGET_Y_RATIO = 0.60
 
 
 class CaptureStopMonitor:
@@ -148,6 +150,16 @@ def _restore_system_subprocess_environment() -> None:
         os.environ.pop("LD_LIBRARY_PATH", None)
 
 
+def _move_to_scroll_target(controller, region) -> None:
+    """Move the pointer to a browser-safe interior point before wheel input."""
+
+    # 浏览器中央常见视频、地图、画布等会截获滚轮，顶部两角也可能有悬浮小视频。
+    # 仅把滚轮落点移到选区右侧偏中下位置；截图区域、滚动量和拼接流程保持不变。
+    target_x = region.x + min(region.width - 1, int(region.width * SCROLL_TARGET_X_RATIO))
+    target_y = region.y + min(region.height - 1, int(region.height * SCROLL_TARGET_Y_RATIO))
+    controller.move_pointer(target_x, target_y)
+
+
 def create_capture_runner(
     core: ModuleType,
     effective_min_overlap: Callable[[int, int], int],
@@ -201,7 +213,7 @@ def create_capture_runner(
 
         previous_sigint = signal.signal(signal.SIGINT, request_stop)
         try:
-            controller.move_to_region(region)
+            _move_to_scroll_target(controller, region)
             time.sleep(args.settle_delay)
             if workspace_changed():
                 raise core.CaptureError("workspace changed before capture started")
@@ -221,7 +233,7 @@ def create_capture_runner(
                 if should_stop() or workspace_changed():
                     break
 
-                controller.move_to_region(region)
+                _move_to_scroll_target(controller, region)
                 controller.scroll_down(args.scroll_ticks)
                 if wait_or_stop(args.delay) or workspace_changed():
                     break
@@ -282,7 +294,7 @@ def create_capture_runner(
                     and not workspace_changed()
                 ):
                     for recovery_index in range(MATCH_SCROLL_RECOVERY_ROUNDS):
-                        controller.move_to_region(region)
+                        _move_to_scroll_target(controller, region)
                         controller.scroll_down(1)
                         if wait_or_stop(args.delay) or workspace_changed():
                             break
