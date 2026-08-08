@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Callable
 
 import cv2
@@ -154,10 +154,12 @@ def _move_to_scroll_target(controller, region) -> None:
     """Move the pointer to a browser-safe interior point before wheel input."""
 
     # 浏览器中央常见视频、地图、画布等会截获滚轮，顶部两角也可能有悬浮小视频。
-    # 仅把滚轮落点移到选区右侧偏中下位置；截图区域、滚动量和拼接流程保持不变。
+    # 保持既有 move_to_region() 调用接口，只构造一个 1x1 临时指针目标区域，
+    # 让其中心精确落在选区右侧偏中下位置；真实截图区域、滚动量和拼接流程不变。
     target_x = region.x + min(region.width - 1, int(region.width * SCROLL_TARGET_X_RATIO))
     target_y = region.y + min(region.height - 1, int(region.height * SCROLL_TARGET_Y_RATIO))
-    controller.move_pointer(target_x, target_y)
+    target_region = SimpleNamespace(x=target_x, y=target_y, width=1, height=1)
+    controller.move_to_region(target_region)
 
 
 def create_capture_runner(
