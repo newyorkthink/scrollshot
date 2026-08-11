@@ -28,6 +28,7 @@ from resilient_stitch import create_resilient_stitcher
 from seam_cleanup import create_seam_cleaning_stitcher
 from selection_guides import create_select_region
 from structural_match import create_structural_estimator
+from terminal_scroll import configure_terminal_scrolling
 
 
 def _notification_environment() -> dict[str, str]:
@@ -146,6 +147,10 @@ _capture_runner = create_capture_runner(
     core,
     effective_min_overlap,
 )
+
+# 终端路径只在目标确实是 Kitty/Alacritty + tmux 时接管滚动；
+# 浏览器、Dolphin、PDF 等仍逐字保留上面的稳定 X11 捕获链。
+_capture_runner = configure_terminal_scrolling(core, _capture_runner)
 
 
 # 只有捕获函数成功完成并返回保存路径后才发送“已保存”通知。
