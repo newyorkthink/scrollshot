@@ -10,11 +10,11 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器、
 
 > **最终稳定基线：2026-08-11**
 >
-> 当前已实际验证的运行逻辑锚点为 `016d8b677e49a81e129fb5139c6cbeed287525e4`。
+> 此前完整终端实测锚点为 `016d8b677e49a81e129fb5139c6cbeed287525e4`；当前最终代码基线为 `53297e7d43560ddbd14ce5956d2b4c4098204e82`。
 >
-> 该锚点保留此前 Dolphin、浏览器、YouTube、PDF/整窗 GUI、i3/EWMH、`Esc`/`Ctrl+C`、工作区保护、Kando 通知和浏览器安全滚轮落点等稳定行为，并完成了 **Alacritty / Kitty + tmux + Lazygit 的双向滚动截图收尾**。
+> `58bc73c35401f6128e4cb27789d3d48816956b00` 将 Lazygit 向上应用层 `K` 分流从 Kitty 扩展到 Alacritty / Kitty；`53297e7d...` 修复交互框选后鼠标被恢复到选区右下角的问题。
 >
-> 本次最终文档整理只更新 README 和稳定基线笔记，不修改已经实测通过的运行逻辑，因此不会为了“整理注释”重新生成一个未经实测的新 AppImage。详细维护笔记见 [`STABLE_BASELINE_20260807.md`](STABLE_BASELINE_20260807.md)。
+> 其余 Dolphin、浏览器、YouTube、PDF/整窗 GUI、i3/EWMH、`Esc`/`Ctrl+C`、工作区保护、Kando 通知和浏览器安全滚轮落点等稳定行为保持不变。详细历史维护笔记见 [`STABLE_BASELINE_20260807.md`](STABLE_BASELINE_20260807.md)。
 
 ## 已验证的最终状态
 
@@ -34,14 +34,14 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器、
 
 ### 终端 / tmux / Lazygit
 
-2026-08-11 最终实测矩阵：
+2026-08-11 目标矩阵：
 
 | 场景 | 向下滚动截图 | 向上滚动截图 |
 | --- | --- | --- |
-| Alacritty + tmux 普通终端 | 已验证 | 已验证 |
-| Alacritty + tmux + Lazygit | 已验证 | 已验证 |
-| Kitty + tmux 普通终端 | 已验证 | 已验证 |
-| Kitty + tmux + Lazygit | 已验证 | 已验证 |
+| Alacritty + tmux 普通终端 | 支持 | 支持 |
+| Alacritty + tmux + Lazygit | 支持 | 支持 |
+| Kitty + tmux 普通终端 | 支持 | 支持 |
+| Kitty + tmux + Lazygit | 支持 | 支持 |
 
 终端最终实现不是“一种输入方式强行兼容所有终端”，而是保留已经实测有效的分流：
 
@@ -49,9 +49,23 @@ ScrollShot 是面向 **Linux X11** 的滚动截图 AppImage，可对浏览器、
 - **Kitty 普通向下**：当目标 pane 已处于 tmux copy-mode 时，直接通过 tmux `scroll-down` 小步滚动；否则保留原 X11 回退路径。
 - **Kitty + Lazygit 向下**：保持 Lazygit 本身运行，不进入 copy-mode，通过 tmux 向 Lazygit 发送其小步下滚键 `J`。
 - **普通终端向上**：在第一帧截图前先进入 tmux copy-mode，再通过 tmux `scroll-up` 小步向上滚动，最后按反向采集顺序重新拼接为正常阅读顺序。
-- **Kitty + Lazygit 向上**：不进入 tmux copy-mode，直接通过 tmux 向 Lazygit 发送其小步上滚键 `K`，避免冻结 Lazygit 自己的滚动视口。
+- **Alacritty / Kitty + Lazygit 向上**：不进入 tmux copy-mode，直接通过 tmux 向 Lazygit 发送其小步上滚键 `K`，避免冻结 Lazygit 自己的滚动视口。
 
 **不需要也不应为 ScrollShot 安装 `ydotool`，不需要把当前用户加入 Linux `input` 组，也不需要额外的 uinput/输入守护进程。**
+
+### 鼠标位置恢复
+
+- 交互框选前先记录真实鼠标位置。
+- 截图过程中仍可按既有逻辑把指针移动到安全滚轮位置。
+- 截图结束后恢复到**框选开始前**的位置，而不是拖拽框选结束时的右下角。
+- `--geometry` 固定区域模式不经过交互框选，保持原有行为。
+
+### 后台与内存
+
+- ScrollShot 没有常驻后台服务或守护进程。
+- 捕获期间的 `Esc` 监听线程只在当前 ScrollShot 进程内临时存在，结束时关闭。
+- tmux 命令和 `notify-send` 是短生命周期子进程，不常驻。
+- 捕获帧会在内存中保留到最终拼接；内存占用随选区和帧数增加，ScrollShot 进程退出后由系统自动回收。
 
 ## 获取稳定 AppImage
 
@@ -81,12 +95,12 @@ chmod +x scrollshot.AppImage
 2. 移动鼠标时使用全屏十字线和跟随鼠标的像素放大镜定位。
 3. 拖动框选实际需要滚动的区域。
 4. 松开鼠标后不要移动、遮挡目标窗口，也不要改变缩放比例或标签页。
-5. ScrollShot 自动滚动、匹配和拼接；浏览器/PDF/整窗 GUI 使用既定的稳定匹配与恢复链，终端根据 Alacritty/Kitty/tmux/Lazygit 状态进入对应的已验证分流。
-6. PNG 默认保存到 `~/Pictures/`，保存成功后自动发送桌面通知。
+5. ScrollShot 自动滚动、匹配和拼接；浏览器/PDF/整窗 GUI 使用既定的稳定匹配与恢复链，终端根据 Alacritty/Kitty/tmux/Lazygit 状态进入对应分流。
+6. PNG 默认保存到 `~/Pictures/`，保存成功后自动发送桌面通知；交互框选模式最终恢复到框选开始前的鼠标位置。
 
 ## 终端向上截图
 
-`--scroll-up` 专门用于当前已经验证的 **Alacritty / Kitty + tmux** 终端场景。
+`--scroll-up` 专门用于 **Alacritty / Kitty + tmux** 终端场景。
 
 在 **Linux X11 图形终端**执行：
 
@@ -154,6 +168,7 @@ Kando 只需要启动 ScrollShot 本身，不需要在命令后面额外拼接 `
 - 自动避让同名输出文件，不覆盖已有截图。
 - 支持 Alacritty / Kitty + tmux 终端向上截图。
 - 针对 Kitty 的 XInput2/传统 X11 滚轮差异，使用 tmux/Lazygit 应用层滚动分流，不引入额外输入守护程序。
+- 交互框选截图结束后恢复框选开始前的鼠标位置。
 
 ## 常用参数
 
@@ -198,9 +213,9 @@ Kando 只需要启动 ScrollShot 本身，不需要在命令后面额外拼接 `
 
 - x86_64 Linux。
 - X11 图形会话；不支持原生 Wayland 会话。
-- 终端双向模式按当前实测基线面向 **Alacritty / Kitty + tmux**；`--scroll-up` 需要目标终端存在可解析的活动 tmux client。
+- 终端双向模式面向 **Alacritty / Kitty + tmux**；`--scroll-up` 需要目标终端存在可解析的活动 tmux client。
 - Kitty 普通向下的 tmux 专用路径只在 pane 已处于 copy-mode 时接管；其他状态保持既有 X11 回退逻辑。
-- Kitty + Lazygit 双向滚动依赖 Lazygit 当前默认的小步滚动键 `K` / `J`；如果用户以后自行重映射 Lazygit 对应键位，需要同步调整 ScrollShot。
+- Alacritty / Kitty + Lazygit 双向滚动依赖 Lazygit 当前默认的小步滚动键 `K` / `J`；如果用户以后自行重映射 Lazygit 对应键位，需要同步调整 ScrollShot。
 - 不依赖 `ydotool`、`input` 组、uinput daemon 或 root 权限。
 - GUI 滚动输入默认发送到选区横向约 85%、纵向约 60% 的安全落点；该位置仍必须能够把滚轮传给目标滚动容器。如果某个特殊网页控件恰好覆盖并截获该位置，滚动仍可能受影响。
 - 建议只框选实际滚动内容，不要包含无关窗口。
@@ -213,7 +228,7 @@ Kando 只需要启动 ScrollShot 本身，不需要在命令后面额外拼接 `
 最终装配顺序保存在 `src/scrollshot_app.py`，后层依赖前层的保守回退行为，**不要随意重排**：
 
 ```text
-框选层
+框选层 / 框选前鼠标位置记录
   -> 原始位移匹配
   -> 重复布局结构校验
   -> 浏览器 / PDF / 整窗 GUI 回退匹配
@@ -222,14 +237,15 @@ Kando 只需要启动 ScrollShot 本身，不需要在命令后面额外拼接 `
   -> 拼接缝保守清理
   -> 捕获运行层（安全滚轮落点 / Esc / 工作区保护 / 底部判定 / 匹配恢复）
   -> 终端滚动分流层（Alacritty / Kitty / tmux / Lazygit / --scroll-up）
+  -> 鼠标位置恢复
   -> 保存成功后的桌面通知
 ```
 
-各模块职责、终端分流中文维护说明和维护禁区见 [`STABLE_BASELINE_20260807.md`](STABLE_BASELINE_20260807.md)。
+终端基础分流位于 `src/terminal_scroll.py`；Alacritty / Kitty + Lazygit 向上识别扩展位于 `src/terminal_scroll_lazygit.py`。历史模块职责、终端分流中文维护说明和维护禁区见 [`STABLE_BASELINE_20260807.md`](STABLE_BASELINE_20260807.md)。
 
 ## 最终稳定维护原则
 
-当前 `016d8b677e49a81e129fb5139c6cbeed287525e4` 已完成真实环境双向终端回归验证，因此后续维护应遵守：
+此前 `016d8b677e49a81e129fb5139c6cbeed287525e4` 完成了真实环境双向终端回归；当前代码基线 `53297e7d43560ddbd14ce5956d2b4c4098204e82` 在其后只增加针对 Alacritty+Lazygit 向上和框选前鼠标位置恢复的定向修复。后续维护应遵守：
 
 - 不为了“统一实现”把 Alacritty、Kitty、tmux copy-mode 和 Lazygit 强行改成同一种输入方式。
 - 不重新引入 `ydotool`、用户 `input` 组权限或其他外部输入守护程序。
@@ -237,6 +253,7 @@ Kando 只需要启动 ScrollShot 本身，不需要在命令后面额外拼接 `
 - 不改变已经验证有效的浏览器 X=85%、Y=60% 安全滚轮位置。
 - 不改变捕获/匹配/拼接装配顺序。
 - 修改终端路径时必须同时回归四个组合的向上和向下，总计 8 个方向场景。
+- 修改鼠标逻辑时必须确认最终恢复到框选开始前的位置。
 - README/稳定笔记整理不应修改运行代码，也不应无意义消耗 GitHub Actions 构建分钟。
 
 ## GitHub Actions
@@ -254,7 +271,7 @@ Kando 只需要启动 ScrollShot 本身，不需要在命令后面额外拼接 `
 7. 生成 SHA-256 校验文件。
 8. 更新唯一的 `latest` Release。
 
-自动测试不能替代真实 Kitty/Alacritty/tmux/Lazygit 交互回归；2026-08-11 的最终终端矩阵已经由真实环境逐项验证。
+自动测试不能替代真实 Kitty/Alacritty/tmux/Lazygit 交互回归；涉及终端分流改动时仍需按 8 个方向场景做最终实机确认。
 
 ## License
 

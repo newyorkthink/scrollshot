@@ -1,5 +1,15 @@
 # ScrollShot 最终稳定基线笔记（2026-08-11）
 
+## 2026-08-11 最终增补
+
+- 此前完整终端实测锚点继续保留为 `016d8b677e49a81e129fb5139c6cbeed287525e4`。
+- 当前最终代码基线为 `53297e7d43560ddbd14ce5956d2b4c4098204e82`。
+- `58bc73c35401f6128e4cb27789d3d48816956b00`：将 Lazygit 向上 `K` 应用层分流从 Kitty 扩展到 **Alacritty / Kitty**，避免 Alacritty + Lazygit 向上时误进入 tmux copy-mode。
+- `53297e7d43560ddbd14ce5956d2b4c4098204e82`：交互框选前记录真实鼠标位置；截图完成后恢复到框选开始前的位置，不再恢复到拖拽框选结束时的右下角。`--geometry` 固定区域模式保持原行为。
+- ScrollShot 不增加常驻后台服务：`Esc` 监听线程只在捕获期间存在；tmux/`notify-send` 为短生命周期子进程。捕获帧保留到最终拼接，进程退出后由系统回收内存。
+- 当前终端向上 Lazygit 分流：**Alacritty / Kitty + Lazygit 均保持应用自身视口并通过 tmux 发送 `K`**；不要重新送入 copy-mode。
+- 下文中把 `016d8b...` 称为“最终锚点”的历史文字，按本增补理解为“此前完整实测锚点”；当前代码 HEAD 以 `53297e7d...` 为准。除这两项定向修复外，下文既有稳定内容和维护禁区继续有效。
+
 > 文件名 `STABLE_BASELINE_20260807.md` 沿用既有路径，避免为了纯文档整理改变 GitHub Actions 的 `paths-ignore` 和稳定链接；本文档内容以 2026-08-11 的最终实测状态为准。
 
 本文档记录 ScrollShot 当前已经实际验证有效的行为、模块关系、终端双向滚动分流、维护边界和回归风险。后续修改应先以本文件为基线检查，不应因为代码看起来“可以统一/简化”就重排、合并或删除已经验证有效的逻辑。
@@ -286,16 +296,16 @@ create_select_region
 
 ### `_kitty_lazygit_state()` / `scroll_kitty_lazygit()`
 
-- 只在 Kitty + alternate screen + `pane_current_command=lazygit` 时成立。
+- 历史基础实现只在 Kitty + alternate screen + `pane_current_command=lazygit` 时成立；当前最终代码通过 `src/terminal_scroll_lazygit.py` 将**向上 Lazygit 识别扩展到 Alacritty / Kitty**。
 - 向下发送 `J`，向上发送 `K`。
-- Kitty + Lazygit 向上必须留在 Lazygit 自身，不进入 copy-mode。
+- Alacritty / Kitty + Lazygit 向上必须留在 Lazygit 自身，不进入 copy-mode。
 
 ### `configure_terminal_scrolling()`
 
 - 普通 `scrollshot`：保持正常 capture runner，只有 Kitty 特定场景在 `scroll_down()` 时被分流。
 - `--scroll-up`：临时包装 `move_to_region`、`scroll_down`、`close`、匹配器和拼接器。
 - 普通终端先 `prepare_copy_mode()` 再拍第一帧。
-- Kitty + Lazygit 向上记录 controller ID，改走 `K`，并跳过 copy-mode restore。
+- Alacritty / Kitty + Lazygit 向上记录 controller ID，改走 `K`，并跳过 copy-mode restore。
 - 捕获结束后所有 monkey patch 必须在 `finally` 中恢复。
 
 ## 8. 最终通知链路
@@ -349,7 +359,7 @@ create_select_region
 - 构建通过后更新唯一的 `latest` Release。
 - 不应通过连续小提交反复触发 Actions 来试错。
 
-最终终端逻辑锚点 `016d8b...` 已在真实环境完成 8 个方向组合验证。后续纯 README/稳定笔记整理属于 `paths-ignore`，不应再次消耗 Actions 构建分钟。
+此前完整终端实测锚点 `016d8b...` 已在真实环境完成 8 个方向组合验证；当前代码 HEAD 为 `53297e7d...`，其后续两项定向修复见本文开头增补。纯 README/稳定笔记整理属于 `paths-ignore`，不应再次消耗 Actions 构建分钟。
 
 修改 workflow 前必须检查：
 
@@ -372,7 +382,7 @@ create_select_region
 - GUI 滚动输入发送到选区横向约 85%、纵向约 60% 的安全位置；该位置仍必须能够把滚轮传给实际滚动容器。如果特殊控件恰好覆盖并截获该点，页面仍可能无法滚动。
 - 终端 `--scroll-up` 当前要求 Alacritty / Kitty 中存在可解析的活动 tmux client。
 - Kitty 普通向下的 tmux 专用路径依赖 pane 已处于 copy-mode；不满足时保留原 X11 回退。
-- Kitty + Lazygit 双向应用层分流依赖 Lazygit 默认小步滚动键 `K` / `J`。如果以后手动重映射 Lazygit，这里必须同步调整并重新回归。
+- Alacritty / Kitty + Lazygit 双向应用层分流依赖 Lazygit 默认小步滚动键 `K` / `J`。如果以后手动重映射 Lazygit，这里必须同步调整并重新回归。
 - 顶部固定/悬浮小视频通常不会在最终拼接图中被每轮大量重复追加，但持续视频、强动画、大面积闪烁、非常规覆盖层仍可能降低重叠匹配可靠性。
 - 极端特殊的网页/PDF/终端 TUI 布局仍可能需要 `--debug-dir` 收集原始帧后再针对性分析。
 - 通知依赖宿主机 `notify-send` 和可用的 Freedesktop 通知服务；缺失时截图本身不受影响。
@@ -391,7 +401,7 @@ create_select_region
 - 是否继续通过 `move_to_region()` 与 Controller 交互，避免再次新增未经测试桩实现的接口依赖。
 - 是否正常滚动和 1 格恢复滚动都使用同一安全目标。
 - 是否完整回归 Alacritty 普通终端上下、Alacritty Lazygit 上下、Kitty 普通终端上下、Kitty Lazygit 上下，共 8 个方向组合。
-- 是否错误地把 Kitty + Lazygit 向上放进 tmux copy-mode。
+- 是否错误地把 Alacritty / Kitty + Lazygit 向上放进 tmux copy-mode。
 - 是否错误地删除 Kitty copy-mode `scroll-down` 分流。
 - 是否重新引入 `ydotool`、`input` 组、uinput 或 root 权限要求。
 - 是否重新引入可能产生 `AAAAA` 的模拟键盘注入。
@@ -402,6 +412,7 @@ create_select_region
 - 是否导致 README-only/笔记-only 修改触发 Actions。
 - 是否修改了无关文件。
 - 是否在提交前完成完整 diff 检查。
+- 是否保持交互框选结束后鼠标恢复到框选开始前位置，而不是选区右下角。
 
 ## 13. 回归时的处理原则
 
@@ -412,15 +423,16 @@ create_select_region
 3. 浏览器滚动异常先检查安全落点是否仍为约 X=85%、Y=60%，以及该点是否被网页特殊控件截获，不要先改拼接算法。
 4. PDF/重复版式问题优先检查既定匹配重试和 1 格恢复链路，不要把 `match is None` 改成直接结束。
 5. Kitty 普通终端问题先区分当前是否处于 tmux copy-mode；不要直接安装输入模拟工具。
-6. Kitty + Lazygit 问题先核对 `pane_current_command`、`alternate_on` 和 `K/J` 绑定；不要先修改 GUI 滚轮链。
+6. Alacritty / Kitty + Lazygit 问题先核对 `pane_current_command`、`alternate_on` 和 `K/J` 绑定；不要先修改 GUI 滚轮链。
 7. 通知问题优先运行 `tests/test_notification_environment.py` 并核对真实 session bus，不要先改截图逻辑。
-8. 一次性完成静态检查和完整 diff 后再提交。
-9. 不使用用户真实环境进行无意义的反复试错。
+8. 鼠标恢复问题先检查框选前坐标是否被保存并传给真正的捕获 Controller，不要改滚动算法。
+9. 一次性完成静态检查和完整 diff 后再提交。
+10. 不使用用户真实环境进行无意义的反复试错。
 
 ## 14. 最终结论
 
-`016d8b677e49a81e129fb5139c6cbeed287525e4` 作为当前已实际验证的最终运行逻辑稳定锚点保留。
+此前完整真实环境终端实测锚点为 `016d8b677e49a81e129fb5139c6cbeed287525e4`；当前最终代码 HEAD 为 `53297e7d43560ddbd14ce5956d2b4c4098204e82`。
 
-该锚点已经具备：Dolphin、浏览器、YouTube 视频页、PDF/整窗 GUI、i3/EWMH、`Esc`/`Ctrl+C`、工作区保护、Kando/普通终端通知、固定侧栏/滚动条处理、匹配失败恢复、浏览器安全滚轮落点，以及 Alacritty / Kitty + tmux + Lazygit 的最终双向滚动截图分流。
+当前代码保留 Dolphin、浏览器、YouTube 视频页、PDF/整窗 GUI、i3/EWMH、`Esc`/`Ctrl+C`、工作区保护、Kando/普通终端通知、固定侧栏/滚动条处理、匹配失败恢复、浏览器安全滚轮落点，并包含 Alacritty / Kitty + tmux + Lazygit 双向滚动分流以及框选前鼠标位置恢复修复。
 
-后续若只是 README、中文维护说明或稳定笔记调整，应保持运行代码和已实测 AppImage 不变；只有真正需要修改运行逻辑时，才重新走完整 Actions 构建和真实环境回归验证。
+后续若只是 README、中文维护说明或稳定笔记调整，应保持运行代码不变；只有真正需要修改运行逻辑时，才重新走完整 Actions 构建和真实环境回归验证。
