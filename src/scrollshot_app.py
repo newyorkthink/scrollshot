@@ -28,7 +28,7 @@ from resilient_stitch import create_resilient_stitcher
 from seam_cleanup import create_seam_cleaning_stitcher
 from selection_guides import create_select_region
 from structural_match import create_structural_estimator
-from terminal_scroll import configure_terminal_scrolling
+from terminal_scroll_lazygit import configure_terminal_scrolling
 
 
 def _notification_environment() -> dict[str, str]:
