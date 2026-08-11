@@ -116,7 +116,43 @@ def _notify_capture_saved(output: Path) -> None:
 _interactive_selector = create_select_region(core)
 _core_estimate_vertical_shift = core.estimate_vertical_shift
 _core_stitch_frames = core.stitch_frames
-core.select_region = _interactive_selector
+
+# 原始 X11Controller 是在框选完成后才创建，因此它看到的“原始鼠标位置”
+# 实际是拖拽框选结束时的右下角。交互框选前先只读取一次真实鼠标位置，
+# 下一次真正的捕获 Controller 创建时覆盖 original_pointer；截图结束后即可
+# 恢复到启动框选前的位置。固定 --geometry 模式保持原有行为不变。
+_original_x11_controller = core.X11Controller
+_pointer_before_selection: tuple[int, int] | None = None
+
+
+class _PointerRestoringController(_original_x11_controller):
+    def __init__(self) -> None:
+        super().__init__()
+        global _pointer_before_selection
+        if _pointer_before_selection is not None:
+            self.original_pointer = _pointer_before_selection
+            _pointer_before_selection = None
+
+
+def _select_region_preserving_pointer():
+    global _pointer_before_selection
+
+    # 这里只读取并保存坐标，不移动鼠标；probe 随即关闭，不留下后台连接。
+    probe = _original_x11_controller()
+    try:
+        _pointer_before_selection = probe.original_pointer
+    finally:
+        probe.close()
+
+    try:
+        return _interactive_selector()
+    except BaseException:
+        _pointer_before_selection = None
+        raise
+
+
+core.X11Controller = _PointerRestoringController
+core.select_region = _select_region_preserving_pointer
 
 # 位移检测链：
 # 原始匹配 -> 重复纹理结构校验 -> 浏览器 / PDF / 整窗 GUI 保守回退匹配。
