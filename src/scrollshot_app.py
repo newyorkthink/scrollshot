@@ -106,11 +106,55 @@ def _notify_capture_saved(output: Path) -> None:
 
 
 def _scroll_up(controller, ticks: int) -> None:
-    """通过 X11 Button 4 发送向上滚轮，不改变既有 Controller 接口。"""
+    """通过 Kitty 默认 Ctrl+Shift+Up 逐行向上浏览终端历史。"""
 
+    # 普通 X11 Button 4 在 Kitty 终端历史中可能不会触发实际 scrollback。
+    # 终端模式改用 Kitty 官方默认的逐行向上快捷键；每个 tick 只移动一行，
+    # 保持足够重叠供现有匹配/拼接链继续使用，不改变普通滚动截图逻辑。
+    keysyms = (
+        0xFFE3,  # Control_L
+        0xFFE1,  # Shift_L
+        0xFF52,  # Up
+    )
+    keycodes = tuple(
+        controller.display.keysym_to_keycode(keysym)
+        for keysym in keysyms
+    )
+    if not all(keycodes):
+        raise core.CaptureError("X11 did not provide terminal scroll keycodes")
+
+    control_keycode, shift_keycode, up_keycode = keycodes
     for _ in range(ticks):
-        controller.xtest.fake_input(controller.display, controller.X.ButtonPress, 4)
-        controller.xtest.fake_input(controller.display, controller.X.ButtonRelease, 4)
+        controller.xtest.fake_input(
+            controller.display,
+            controller.X.KeyPress,
+            control_keycode,
+        )
+        controller.xtest.fake_input(
+            controller.display,
+            controller.X.KeyPress,
+            shift_keycode,
+        )
+        controller.xtest.fake_input(
+            controller.display,
+            controller.X.KeyPress,
+            up_keycode,
+        )
+        controller.xtest.fake_input(
+            controller.display,
+            controller.X.KeyRelease,
+            up_keycode,
+        )
+        controller.xtest.fake_input(
+            controller.display,
+            controller.X.KeyRelease,
+            shift_keycode,
+        )
+        controller.xtest.fake_input(
+            controller.display,
+            controller.X.KeyRelease,
+            control_keycode,
+        )
     controller.display.sync()
 
 
