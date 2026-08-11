@@ -6,7 +6,7 @@ Kitty is routed through tmux when the selected pane is already in tmux copy
 mode, or when Kitty is running Lazygit in the alternate screen. This avoids
 Kitty's ignored synthetic X11 wheel while preserving small-step overlap for
 stitching. Upward terminal capture prepares copy mode before the first frame is
-captured.
+captured, except Kitty+Lazygit which uses Lazygit's own K key directly.
 """
 
 from __future__ import annotations
@@ -266,6 +266,53 @@ class TmuxScrollBridge:
                 self._states[key] = state
         return state
 
+    def _kitty_lazygit_state(self, controller) -> _PaneState | None:
+        """Return the active Kitty tmux pane only when it is running Lazygit."""
+
+        terminal_pid = self._terminal_pid_under_pointer(
+            controller, KITTY_CLASS_MARKERS
+        )
+        if terminal_pid is None:
+            return None
+        state = self._pane_state_for_pid(terminal_pid)
+        if state is None or state.pane_mode == "copy-mode" or not state.alternate_on:
+            return None
+
+        command = self._run(
+            "display-message",
+            "-t",
+            state.pane_id,
+            "-p",
+            "#{pane_current_command}",
+            allow_failure=True,
+        )
+        if not command or Path(command.strip()).name.casefold() != "lazygit":
+            return None
+        return state
+
+    def scroll_kitty_lazygit(
+        self,
+        controller,
+        ticks: int,
+        *,
+        upward: bool,
+    ) -> bool:
+        """Scroll Kitty+Lazygit with Lazygit's own small-step K/J bindings."""
+
+        state = self._kitty_lazygit_state(controller)
+        if state is None:
+            return False
+
+        self._run(
+            "send-keys",
+            "-t",
+            state.pane_id,
+            "-N",
+            str(max(1, int(ticks))),
+            "K" if upward else "J",
+        )
+        return True
+
     def scroll_existing_kitty_copy_mode(self, controller, ticks: int) -> bool:
         """Handle Kitty down-scroll through tmux for copy mode and Lazygit."""
 
@@ -435,9 +482,18 @@ def configure_terminal_scrolling(
         previous_controller_close = core.X11Controller.close
         previous_estimator = core.estimate_vertical_shift
         previous_stitcher = core.stitch_frames
+        kitty_lazygit_up_controllers: set[int] = set()
 
         def move_to_region_and_prepare(controller, region) -> None:
             previous_move_to_region(controller, region)
+
+            # Kitty+Lazygit must stay in the application itself. Entering tmux
+            # copy mode would freeze Lazygit's internal viewport, so use K for
+            # each upward step instead.
+            if bridge._kitty_lazygit_state(controller) is not None:
+                kitty_lazygit_up_controllers.add(id(controller))
+                return
+
             if not bridge.prepare_copy_mode(controller):
                 raise core.CaptureError(
                     "--scroll-up requires the selected Kitty/Alacritty window "
@@ -445,13 +501,19 @@ def configure_terminal_scrolling(
                 )
 
         def terminal_scroll_up(controller, ticks: int) -> None:
+            if id(controller) in kitty_lazygit_up_controllers:
+                if bridge.scroll_kitty_lazygit(controller, ticks, upward=True):
+                    return
+                raise core.CaptureError("Kitty Lazygit upward scrolling is not ready")
+
             if bridge.scroll_copy_mode(controller, ticks, upward=True):
                 return
             raise core.CaptureError("tmux copy-mode upward scrolling is not ready")
 
         def close_with_terminal_restore(controller) -> None:
             try:
-                bridge.restore(controller)
+                if id(controller) not in kitty_lazygit_up_controllers:
+                    bridge.restore(controller)
             finally:
                 previous_controller_close(controller)
 
