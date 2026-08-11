@@ -94,13 +94,23 @@ class TmuxScrollBridge:
         )
 
     def _terminal_pid_under_pointer(self, controller) -> int | None:
+        """Find the deepest Kitty/Alacritty client below the pointer.
+
+        i3 reparents application windows into frame/container windows. Querying
+        the root therefore usually returns the i3 frame, not the terminal
+        client itself. Descend through query_pointer().child until the leaf,
+        then inspect the chain from deepest to shallowest for WM_CLASS.
+        """
+
         try:
-            pointer = controller.root.query_pointer()
-            window = getattr(pointer, "child", None)
-            pid_atom = controller.display.intern_atom("_NET_WM_PID", only_if_exists=True)
+            pid_atom = controller.display.intern_atom(
+                "_NET_WM_PID", only_if_exists=True
+            )
         except Exception:
             return None
 
+        chain = []
+        window = controller.root
         visited: set[int] = set()
         while window is not None:
             marker = int(getattr(window, "id", id(window)))
@@ -109,24 +119,33 @@ class TmuxScrollBridge:
             visited.add(marker)
 
             try:
+                pointer = window.query_pointer()
+                child = getattr(pointer, "child", None)
+            except Exception:
+                break
+
+            if child is None or child == getattr(controller.X, "NONE", 0):
+                break
+            chain.append(child)
+            window = child
+
+        for window in reversed(chain):
+            try:
                 wm_class = window.get_wm_class() or ()
             except Exception:
                 wm_class = ()
             classes = tuple(str(value) for value in wm_class if value)
-            if classes and self._is_terminal_class(classes):
-                try:
-                    prop = window.get_full_property(pid_atom, controller.X.AnyPropertyType)
-                    if prop is not None and len(prop.value):
-                        return int(prop.value[0])
-                except Exception:
-                    pass
+            if not classes or not self._is_terminal_class(classes):
+                continue
 
-            if window == controller.root:
-                break
             try:
-                window = window.query_tree().parent
+                prop = window.get_full_property(
+                    pid_atom, controller.X.AnyPropertyType
+                )
+                if prop is not None and len(prop.value):
+                    return int(prop.value[0])
             except Exception:
-                break
+                continue
         return None
 
     @staticmethod
