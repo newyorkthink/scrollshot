@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Terminal-aware scrolling for ScrollShot without extra input daemons.
+"""Terminal upward capture for ScrollShot through an already-running tmux client.
 
-For ordinary GUI targets ScrollShot keeps its validated X11 Button4/5 path.
-For Kitty/Alacritty windows that are running tmux, this module talks directly
-to the already-running tmux server so terminal scrolling does not depend on
-how the terminal emulator translates synthetic X11 wheel events.
+The normal downward capture path is deliberately left untouched. Upward
+terminal capture enters tmux copy mode before the first frame is captured, so
+all frames use the same visual mode and the stable matcher sees only scrolling.
 """
 
 from __future__ import annotations
@@ -35,7 +34,7 @@ class _PaneState:
 
 
 class TmuxScrollBridge:
-    """Route terminal scrolling through the tmux client behind the X11 window."""
+    """Resolve the tmux pane below the pointer and control its copy mode."""
 
     def __init__(self, core: ModuleType, tmux_executable: str | None = None) -> None:
         self.core = core
@@ -96,10 +95,8 @@ class TmuxScrollBridge:
     def _terminal_pid_under_pointer(self, controller) -> int | None:
         """Find the deepest Kitty/Alacritty client below the pointer.
 
-        i3 reparents application windows into frame/container windows. Querying
-        the root therefore usually returns the i3 frame, not the terminal
-        client itself. Descend through query_pointer().child until the leaf,
-        then inspect the chain from deepest to shallowest for WM_CLASS.
+        i3 reparents clients into frame windows, so descend through the window
+        below the pointer before inspecting WM_CLASS and _NET_WM_PID.
         """
 
         try:
@@ -167,7 +164,9 @@ class TmuxScrollBridge:
                 ttys.add(tty)
 
             try:
-                raw_children = Path(f"/proc/{pid}/task/{pid}/children").read_text()
+                raw_children = Path(
+                    f"/proc/{pid}/task/{pid}/children"
+                ).read_text()
             except OSError:
                 continue
             for child in raw_children.split():
@@ -205,9 +204,6 @@ class TmuxScrollBridge:
         if matched:
             return max(matched, key=lambda item: item[1])[0]
 
-        # A single attached tmux client is unambiguous even if an AppImage
-        # launcher obscures the terminal process tree. With multiple clients,
-        # do not guess and risk scrolling the wrong terminal.
         if len(clients) == 1:
             return clients[0][0]
         return None
@@ -256,53 +252,35 @@ class TmuxScrollBridge:
                 self._states[key] = state
         return state
 
-    def try_scroll(self, controller, ticks: int, *, upward: bool) -> bool:
+    def prepare_copy_mode(self, controller) -> bool:
+        """Enter copy mode without scrolling, before the first capture frame."""
+
         state = self._state_for(controller)
         if state is None:
             return False
-
-        ticks = max(1, int(ticks))
-        direction = "scroll-up" if upward else "scroll-down"
-
-        if state.pane_mode == "copy-mode" or state.entered_copy_mode:
-            self._run(
-                "send-keys",
-                "-t",
-                state.pane_id,
-                "-X",
-                "-N",
-                str(ticks),
-                direction,
-            )
+        if state.pane_mode == "copy-mode":
             return True
 
-        if state.alternate_on:
-            # Full-screen TUIs receive PageUp/PageDown directly from tmux.
-            # This bypasses Kitty's XInput2 wheel path entirely; Lazygit,
-            # less, editors and similar TUIs commonly handle these keys.
-            key = "PageUp" if upward else "PageDown"
-            self._run(
-                "send-keys",
-                "-t",
-                state.pane_id,
-                "-N",
-                str(ticks),
-                key,
-            )
-            return True
-
-        # Plain shell/history: use tmux copy mode instead of terminal-emulator
-        # scrollback. -H hides tmux's copy-mode position indicator from capture.
         self._run("copy-mode", "-H", "-t", state.pane_id)
         state.entered_copy_mode = True
         state.pane_mode = "copy-mode"
+        return True
+
+    def scroll_copy_mode(self, controller, ticks: int, *, upward: bool) -> bool:
+        """Scroll an already-prepared copy-mode pane by a small repeat count."""
+
+        state = self._state_for(controller)
+        if state is None or state.pane_mode != "copy-mode":
+            return False
+
+        direction = "scroll-up" if upward else "scroll-down"
         self._run(
             "send-keys",
             "-t",
             state.pane_id,
             "-X",
             "-N",
-            str(ticks),
+            str(max(1, int(ticks))),
             direction,
         )
         return True
@@ -323,7 +301,10 @@ class TmuxScrollBridge:
                 )
                 return
 
-            if state.pane_mode == "copy-mode" and state.original_scroll_position is not None:
+            if (
+                state.pane_mode == "copy-mode"
+                and state.original_scroll_position is not None
+            ):
                 self._run(
                     "send-keys",
                     "-t",
@@ -351,12 +332,10 @@ def configure_terminal_scrolling(
     core: ModuleType,
     capture_runner: Callable,
 ) -> Callable:
-    """Add tmux terminal scrolling while preserving the stable GUI path."""
+    """Add --scroll-up without changing the validated normal down-scroll path."""
 
     bridge = TmuxScrollBridge(core)
     original_build_parser = core.build_parser
-    original_scroll_down = core.X11Controller.scroll_down
-    original_controller_close = core.X11Controller.close
     stable_estimator = core.estimate_vertical_shift
     stable_stitcher = core.stitch_frames
 
@@ -365,60 +344,62 @@ def configure_terminal_scrolling(
         parser.add_argument(
             "--scroll-up",
             action="store_true",
-            help="capture terminal/tmux history upward and stitch top-to-bottom",
+            help="capture tmux terminal history upward and stitch top-to-bottom",
         )
         return parser
 
-    def terminal_aware_scroll_down(controller, ticks: int) -> None:
-        if bridge.try_scroll(controller, ticks, upward=False):
-            return
-        original_scroll_down(controller, ticks)
-
-    def close_with_terminal_restore(controller) -> None:
-        try:
-            bridge.restore(controller)
-        finally:
-            original_controller_close(controller)
-
     core.build_parser = build_parser_with_scroll_up
-    core.X11Controller.scroll_down = terminal_aware_scroll_down
-    core.X11Controller.close = close_with_terminal_restore
 
     def run_capture(args):
+        # 普通向下截图严格保留既有稳定路径，不再让 tmux 接管。
         if not bool(getattr(args, "scroll_up", False)):
             return capture_runner(args)
 
+        previous_move_to_region = core.X11Controller.move_to_region
         previous_scroll_down = core.X11Controller.scroll_down
+        previous_controller_close = core.X11Controller.close
         previous_estimator = core.estimate_vertical_shift
         previous_stitcher = core.stitch_frames
 
+        def move_to_region_and_prepare(controller, region) -> None:
+            previous_move_to_region(controller, region)
+            if not bridge.prepare_copy_mode(controller):
+                raise core.CaptureError(
+                    "--scroll-up requires the selected Kitty/Alacritty window "
+                    "to use an active tmux client"
+                )
+
         def terminal_scroll_up(controller, ticks: int) -> None:
-            if bridge.try_scroll(controller, ticks, upward=True):
+            if bridge.scroll_copy_mode(controller, ticks, upward=True):
                 return
-            raise core.CaptureError(
-                "--scroll-up requires the selected Kitty/Alacritty window to use an active tmux client"
-            )
+            raise core.CaptureError("tmux copy-mode upward scrolling is not ready")
+
+        def close_with_terminal_restore(controller) -> None:
+            try:
+                bridge.restore(controller)
+            finally:
+                previous_controller_close(controller)
 
         def estimate_upward(previous, current, **kwargs):
-            # Acquisition is bottom -> top. Swap the frame pair so the already
-            # validated downward matcher still sees top -> bottom motion.
             return stable_estimator(current, previous, **kwargs)
 
         def stitch_upward(frames, matches):
-            # Convert acquisition order bottom -> top back to normal reading
-            # order top -> bottom before entering the stable stitching chain.
             return stable_stitcher(
                 list(reversed(frames)),
                 list(reversed(matches)),
             )
 
+        core.X11Controller.move_to_region = move_to_region_and_prepare
         core.X11Controller.scroll_down = terminal_scroll_up
+        core.X11Controller.close = close_with_terminal_restore
         core.estimate_vertical_shift = estimate_upward
         core.stitch_frames = stitch_upward
         try:
             return capture_runner(args)
         finally:
+            core.X11Controller.move_to_region = previous_move_to_region
             core.X11Controller.scroll_down = previous_scroll_down
+            core.X11Controller.close = previous_controller_close
             core.estimate_vertical_shift = previous_estimator
             core.stitch_frames = previous_stitcher
 
