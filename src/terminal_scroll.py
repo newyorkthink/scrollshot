@@ -2,10 +2,11 @@
 """Terminal scrolling helpers for ScrollShot through an already-running tmux client.
 
 Alacritty and ordinary GUI downward capture keep the validated X11 path.
-Kitty is only routed through tmux when the selected pane is already in tmux
-copy mode; this avoids Kitty's ignored synthetic X11 wheel while preserving
-small-step overlap for stitching. Upward terminal capture prepares copy mode
-before the first frame is captured.
+Kitty is routed through tmux when the selected pane is already in tmux copy
+mode, or when Kitty is running Lazygit in the alternate screen. This avoids
+Kitty's ignored synthetic X11 wheel while preserving small-step overlap for
+stitching. Upward terminal capture prepares copy mode before the first frame is
+captured.
 """
 
 from __future__ import annotations
@@ -266,7 +267,7 @@ class TmuxScrollBridge:
         return state
 
     def scroll_existing_kitty_copy_mode(self, controller, ticks: int) -> bool:
-        """Scroll down only when the pointer is on Kitty already in tmux copy mode."""
+        """Handle Kitty down-scroll through tmux for copy mode and Lazygit."""
 
         terminal_pid = self._terminal_pid_under_pointer(
             controller, KITTY_CLASS_MARKERS
@@ -274,17 +275,46 @@ class TmuxScrollBridge:
         if terminal_pid is None:
             return False
         state = self._pane_state_for_pid(terminal_pid)
-        if state is None or state.pane_mode != "copy-mode":
+        if state is None:
+            return False
+
+        ticks = max(1, int(ticks))
+
+        if state.pane_mode == "copy-mode":
+            self._run(
+                "send-keys",
+                "-t",
+                state.pane_id,
+                "-X",
+                "-N",
+                str(ticks),
+                "scroll-down",
+            )
+            return True
+
+        # Kitty ignores ScrollShot's synthetic X11 wheel in Lazygit. Lazygit
+        # maps uppercase J to its global small-step "scroll down main" action,
+        # which keeps enough overlap between frames for ScrollShot stitching.
+        if not state.alternate_on:
+            return False
+        command = self._run(
+            "display-message",
+            "-t",
+            state.pane_id,
+            "-p",
+            "#{pane_current_command}",
+            allow_failure=True,
+        )
+        if not command or Path(command.strip()).name.casefold() != "lazygit":
             return False
 
         self._run(
             "send-keys",
             "-t",
             state.pane_id,
-            "-X",
             "-N",
-            str(max(1, int(ticks))),
-            "scroll-down",
+            str(ticks),
+            "J",
         )
         return True
 
@@ -387,7 +417,8 @@ def configure_terminal_scrolling(
 
     def terminal_aware_scroll_down(controller, ticks: int) -> None:
         # Alacritty and normal GUI remain on the validated X11 path.
-        # Kitty is intercepted only if tmux copy mode is already active.
+        # Kitty copy mode and Kitty+Lazygit use tmux because Kitty ignores the
+        # synthetic X11 wheel in those cases.
         if bridge.scroll_existing_kitty_copy_mode(controller, ticks):
             return
         original_scroll_down(controller, ticks)
