@@ -187,7 +187,6 @@ def create_capture_runner(
         stop_monitor: CaptureStopMonitor | None = None
         capture_desktop = _read_current_desktop_safely()
         workspace_invalidated = False
-        scroll_up = bool(getattr(args, "scroll_up", False))
 
         def request_stop(_signum, _frame) -> None:
             nonlocal stop_requested
@@ -214,25 +213,6 @@ def create_capture_runner(
                 time.sleep(max(0.0, float(seconds)))
             return should_stop()
 
-        def send_scroll(ticks: int) -> None:
-            if scroll_up:
-                core.scroll_up(controller, ticks)
-            else:
-                controller.scroll_down(ticks)
-
-        def estimate_match(previous, current):
-            # 向上抓取终端历史时，截图时间顺序与最终文档顺序相反。
-            # 交换匹配输入即可继续复用已经验证的“向下滚动”匹配链。
-            match_previous, match_current = (
-                (current, previous) if scroll_up else (previous, current)
-            )
-            return core.estimate_vertical_shift(
-                match_previous,
-                match_current,
-                min_overlap=args.min_overlap,
-                score_threshold=args.match_threshold,
-            )
-
         previous_sigint = signal.signal(signal.SIGINT, request_stop)
         try:
             _move_to_scroll_target(controller, region)
@@ -256,7 +236,7 @@ def create_capture_runner(
                     break
 
                 _move_to_scroll_target(controller, region)
-                send_scroll(args.scroll_ticks)
+                controller.scroll_down(args.scroll_ticks)
                 if wait_or_stop(args.delay) or workspace_changed():
                     break
 
@@ -283,7 +263,12 @@ def create_capture_runner(
                     continue
 
                 stable_rounds = 0
-                match = estimate_match(previous, current)
+                match = core.estimate_vertical_shift(
+                    previous,
+                    current,
+                    min_overlap=args.min_overlap,
+                    score_threshold=args.match_threshold,
+                )
 
                 retry_frame = current
                 for _ in range(MATCH_RETRY_ROUNDS):
@@ -294,7 +279,12 @@ def create_capture_runner(
                     retry_frame = controller.capture(region)
                     if workspace_changed():
                         break
-                    match = estimate_match(previous, retry_frame)
+                    match = core.estimate_vertical_shift(
+                        previous,
+                        retry_frame,
+                        min_overlap=args.min_overlap,
+                        score_threshold=args.match_threshold,
+                    )
 
                 # PDF 双页/整窗等重复布局可能让某一轮重叠匹配暂时无解。
                 # 不立即结束整次截图；仅在较高选区里小步继续滚动两次，
@@ -307,7 +297,7 @@ def create_capture_runner(
                 ):
                     for recovery_index in range(MATCH_SCROLL_RECOVERY_ROUNDS):
                         _move_to_scroll_target(controller, region)
-                        send_scroll(1)
+                        controller.scroll_down(1)
                         if wait_or_stop(args.delay) or workspace_changed():
                             break
 
@@ -323,7 +313,12 @@ def create_capture_runner(
                                 recovery_frame,
                             )
 
-                        match = estimate_match(previous, recovery_frame)
+                        match = core.estimate_vertical_shift(
+                            previous,
+                            recovery_frame,
+                            min_overlap=args.min_overlap,
+                            score_threshold=args.match_threshold,
+                        )
                         if match is not None:
                             retry_frame = recovery_frame
                             break
@@ -342,12 +337,7 @@ def create_capture_runner(
                 frames.append(current)
                 matches.append(match)
 
-            # 终端向上抓取时，采集顺序是“底部 -> 顶部”；最终图片仍应保持
-            # 正常阅读顺序“顶部 -> 底部”。反转已确认帧和对应匹配即可继续
-            # 复用现有稳健拼接/拼接缝清理链，不改动这些稳定算法。
-            stitch_frames = list(reversed(frames)) if scroll_up else frames
-            stitch_matches = list(reversed(matches)) if scroll_up else matches
-            stitched = core.stitch_frames(stitch_frames, stitch_matches)
+            stitched = core.stitch_frames(frames, matches)
             core.save_png(output, stitched)
 
             # 后续启动入口会调用系统 notify-send；冻结环境先恢复宿主机动态库路径。
