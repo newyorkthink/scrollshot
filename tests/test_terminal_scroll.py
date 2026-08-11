@@ -57,6 +57,45 @@ class BridgeTests(unittest.TestCase):
             ("send-keys", "-t", "%4", "-X", "-N", "3", "scroll-down"),
         )
 
+    def test_kitty_lazygit_scrolls_down_through_J(self):
+        bridge = self.make_bridge()
+        controller = object()
+        state = terminal_scroll._PaneState(
+            pane_id="%5",
+            pane_mode="",
+            original_scroll_position=None,
+            alternate_on=True,
+        )
+        calls = []
+
+        def fake_run(*args, **kwargs):
+            calls.append((args, kwargs))
+            if args and args[0] == "display-message":
+                return "lazygit\n"
+            return ""
+
+        with mock.patch.object(
+            bridge,
+            "_terminal_pid_under_pointer",
+            return_value=1234,
+        ), mock.patch.object(
+            bridge,
+            "_pane_state_for_pid",
+            return_value=state,
+        ), mock.patch.object(
+            bridge,
+            "_run",
+            side_effect=fake_run,
+        ):
+            self.assertTrue(
+                bridge.scroll_existing_kitty_copy_mode(controller, 3)
+            )
+
+        self.assertEqual(
+            calls[-1][0],
+            ("send-keys", "-t", "%5", "-N", "3", "J"),
+        )
+
     def test_kitty_without_copy_mode_falls_back(self):
         bridge = self.make_bridge()
         controller = object()
@@ -82,6 +121,34 @@ class BridgeTests(unittest.TestCase):
                 bridge.scroll_existing_kitty_copy_mode(controller, 3)
             )
         run.assert_not_called()
+
+    def test_kitty_lazygit_scrolls_up_through_K(self):
+        bridge = self.make_bridge()
+        controller = object()
+        state = terminal_scroll._PaneState(
+            pane_id="%6",
+            pane_mode="",
+            original_scroll_position=None,
+            alternate_on=True,
+        )
+        calls = []
+        with mock.patch.object(
+            bridge,
+            "_kitty_lazygit_state",
+            return_value=state,
+        ), mock.patch.object(
+            bridge,
+            "_run",
+            side_effect=lambda *args, **kwargs: calls.append((args, kwargs)) or "",
+        ):
+            self.assertTrue(
+                bridge.scroll_kitty_lazygit(controller, 2, upward=True)
+            )
+
+        self.assertEqual(
+            calls[0][0],
+            ("send-keys", "-t", "%6", "-N", "2", "K"),
+        )
 
     def test_prepare_copy_mode_before_scroll(self):
         bridge = self.make_bridge()
@@ -324,6 +391,68 @@ class ConfigureTests(unittest.TestCase):
             events.index(("restore", 0)),
             events.index(("original-close", 0)),
         )
+
+    def test_scroll_up_kitty_lazygit_stays_in_app_and_skips_restore(self):
+        events = []
+        core = self.make_core(events)
+        lazygit_state = terminal_scroll._PaneState(
+            pane_id="%8",
+            pane_mode="",
+            original_scroll_position=None,
+            alternate_on=True,
+        )
+
+        def capture_runner(_args):
+            controller = core.X11Controller()
+            try:
+                controller.move_to_region("region")
+                events.append(("capture-first", 0))
+                controller.scroll_down(2)
+                core.estimate_vertical_shift("bottom", "top")
+                core.stitch_frames(["bottom", "top"], ["match"])
+                return "ok"
+            finally:
+                controller.close()
+
+        with mock.patch.object(
+            terminal_scroll.TmuxScrollBridge,
+            "_kitty_lazygit_state",
+            return_value=lazygit_state,
+        ), mock.patch.object(
+            terminal_scroll.TmuxScrollBridge,
+            "scroll_kitty_lazygit",
+            side_effect=lambda _controller, ticks, upward: (
+                events.append(("kitty-lazygit-up", ticks, upward)) or True
+            ),
+        ), mock.patch.object(
+            terminal_scroll.TmuxScrollBridge,
+            "prepare_copy_mode",
+            side_effect=AssertionError("Kitty+Lazygit must not enter copy mode"),
+        ), mock.patch.object(
+            terminal_scroll.TmuxScrollBridge,
+            "scroll_copy_mode",
+            side_effect=AssertionError("Kitty+Lazygit must not use copy-mode scroll"),
+        ), mock.patch.object(
+            terminal_scroll.TmuxScrollBridge,
+            "restore",
+            side_effect=AssertionError("Kitty+Lazygit must not restore copy mode"),
+        ), mock.patch.object(
+            terminal_scroll.TmuxScrollBridge,
+            "scroll_existing_kitty_copy_mode",
+            return_value=False,
+        ):
+            wrapped = terminal_scroll.configure_terminal_scrolling(
+                core, capture_runner
+            )
+            args = core.build_parser().parse_args(["--scroll-up"])
+            self.assertEqual(wrapped(args), "ok")
+
+        self.assertIn(("kitty-lazygit-up", 2, True), events)
+        self.assertIn(("estimate", "top", "bottom"), events)
+        self.assertIn(("stitch", ["top", "bottom"], ["match"]), events)
+        self.assertNotIn(("prepare", 0), events)
+        self.assertNotIn(("restore", 0), events)
+        self.assertIn(("original-close", 0), events)
 
 
 if __name__ == "__main__":
