@@ -105,6 +105,34 @@ def _notify_capture_saved(output: Path) -> None:
         return
 
 
+def _scroll_up(controller, ticks: int) -> None:
+    """通过 X11 Button 4 发送向上滚轮，不改变既有 Controller 接口。"""
+
+    for _ in range(ticks):
+        controller.xtest.fake_input(controller.display, controller.X.ButtonPress, 4)
+        controller.xtest.fake_input(controller.display, controller.X.ButtonRelease, 4)
+    controller.display.sync()
+
+
+# 终端历史截图是独立的附加模式；默认向下滚动参数和行为保持不变。
+# 参数只在最终装配入口扩展，因此 AppImage 与 install.sh 安装入口都可直接使用。
+_core_build_parser = core.build_parser
+
+
+def _build_parser_with_scroll_up():
+    parser = _core_build_parser()
+    parser.add_argument(
+        "--scroll-up",
+        action="store_true",
+        help="scroll upward for terminal history and stitch the result top-to-bottom",
+    )
+    return parser
+
+
+core.build_parser = _build_parser_with_scroll_up
+core.scroll_up = _scroll_up
+
+
 # 最终稳定装配顺序（2026-08-07）：
 # 1. 框选层。
 # 2. 原始位移匹配 -> 重复布局结构校验 -> 浏览器/PDF/整窗 GUI 回退匹配。
