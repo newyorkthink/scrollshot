@@ -1,16 +1,23 @@
-# ScrollShot 最终稳定基线笔记（2026-08-09）
+# ScrollShot 最终稳定基线笔记（2026-08-11）
 
-> 文件名 `STABLE_BASELINE_20260807.md` 沿用既有路径，避免为了纯文档整理改变 GitHub Actions 的 `paths-ignore` 和稳定链接；文档内容以 2026-08-09 的最终实测状态为准。
+> 文件名 `STABLE_BASELINE_20260807.md` 沿用既有路径，避免为了纯文档整理改变 GitHub Actions 的 `paths-ignore` 和稳定链接；本文档内容以 2026-08-11 的最终实测状态为准。
 
-本文档记录 ScrollShot 当前已经实际验证有效的行为、模块关系、维护边界和回归风险。后续修改应先以本文件为基线检查，不应因为代码看起来“可以简化”就重排、合并或删除已经验证有效的逻辑。
+本文档记录 ScrollShot 当前已经实际验证有效的行为、模块关系、终端双向滚动分流、维护边界和回归风险。后续修改应先以本文件为基线检查，不应因为代码看起来“可以统一/简化”就重排、合并或删除已经验证有效的逻辑。
 
 ## 1. 最终稳定基线
 
-已实际验证的运行逻辑锚点：
+当前已实际验证的运行逻辑锚点：
 
-`0c290f2920818c55da5e3860310007096b0a0908`
+`016d8b677e49a81e129fb5139c6cbeed287525e4`
 
-该锚点是在此前浏览器、PDF/整窗 GUI、i3/EWMH、`Esc`、拼接恢复和启动器通知稳定基线上，最终加入浏览器安全滚轮落点后的版本。
+该锚点建立在此前稳定浏览器/PDF/i3/通知基线之上，并完成了终端滚动截图收尾：
+
+- Alacritty + tmux 普通终端：向下、向上均已实测。
+- Alacritty + tmux + Lazygit：向下、向上均已实测。
+- Kitty + tmux 普通终端：向下、向上均已实测。
+- Kitty + tmux + Lazygit：向下、向上均已实测。
+
+此前浏览器安全滚轮运行逻辑锚点 `0c290f2920818c55da5e3860310007096b0a0908` 仍然是 GUI 滚动链的重要历史稳定点；最终锚点 `016d8b...` 在其基础上保留原有 GUI 行为，并增加/修正终端分流。
 
 最终状态已经实际确认：
 
@@ -23,12 +30,11 @@
 - 框选、全局 `Esc`、i3/EWMH 工作区切换行为正常。
 - 捕获阶段 `Esc` / `Ctrl+C` / 工作区切换的停止与保存语义正常。
 - 普通终端启动后桌面通知正常。
-- Kando 仅执行 `/usr/local/bin/scrollshot` 时，截图保存后的桌面通知也已经实际验证正常。
-- `latest` 标签下的 `src/capture_runtime.py` 与当前稳定修正版一致，说明发布的 `latest` AppImage 已包含该运行逻辑。
+- Kando 仅执行 `/usr/local/bin/scrollshot` 时，截图保存后的桌面通知已经实际验证正常。
+- Alacritty / Kitty + tmux + Lazygit 终端双向滚动截图最终实测通过。
+- 不依赖 `ydotool`、用户 `input` 组、uinput daemon 或 root 权限。
 
-中间提交 `d1119117ebbe9123a8371d6f1ea8338bbbfab9c1` 因直接调用 `controller.move_pointer()` 破坏既有测试 Controller 接口而被单元测试拦截，不属于稳定基线。当前锚点 `0c290f2920818c55da5e3860310007096b0a0908` 保留原接口并已通过后续构建发布与实际截图验证。
-
-后续纯 README / 稳定笔记整理不改变这个已验证运行逻辑，也不应为了文档整理重新生成一个未经实际验证的新 AppImage。
+本次 README / 稳定笔记整理只做文档收尾，不修改 `016d8b...` 已经实测通过的运行逻辑，也不应为了“改注释”重新生成一个未经真实环境回归的新 AppImage。
 
 ## 2. 已实际验证的场景
 
@@ -42,7 +48,7 @@
 ### 浏览器 / 网页
 
 - 长网页可以持续滚动。
-- YouTube 播放页已经用最终版本完成实际长截图验证。
+- YouTube 播放页已经用稳定版本完成实际长截图验证。
 - 主匹配暂时不可靠时会进入浏览器回退匹配。
 - 固定侧栏和右侧滚动条已有专门处理。
 - 正常滚动和匹配失败后的 1 格恢复滚动都使用同一套安全滚轮落点。
@@ -56,6 +62,42 @@
 - 单轮匹配暂时失败时，从最后一个已确认帧进行有限的小步滚动恢复。
 - 多行拼接缝、固定视口边界和重复深色分隔线使用保守逻辑处理。
 - 只有确认的帧进入最终拼接链。
+
+### 终端 / tmux / Lazygit
+
+2026-08-11 最终实测矩阵：
+
+| 终端 | 内容 | 向下 | 向上 |
+| --- | --- | --- | --- |
+| Alacritty | tmux 普通终端 | 通过 | 通过 |
+| Alacritty | tmux + Lazygit | 通过 | 通过 |
+| Kitty | tmux 普通终端 | 通过 | 通过 |
+| Kitty | tmux + Lazygit | 通过 | 通过 |
+
+#### 向下分流
+
+- Alacritty 和普通 GUI 默认保持原 X11 滚轮路径。
+- Kitty 普通终端如果当前 pane 已处于 tmux copy-mode，则通过 `tmux send-keys -X ... scroll-down` 小步向下滚动。
+- Kitty 普通终端如果不满足 copy-mode 条件，则不强行切换模式，继续保留原 X11 回退路径。
+- Kitty + Lazygit 处于 alternate screen 时，不进入 tmux copy-mode；确认 `pane_current_command` 为 `lazygit` 后，通过 tmux 向 Lazygit 发送 `J`，使用 Lazygit 自身的小步向下滚动。
+
+#### 向上分流
+
+- `--scroll-up` 是终端专用模式，目标终端需要存在可解析的活动 tmux client。
+- 普通终端向上：在第一帧截图前进入 tmux copy-mode，避免第一帧和后续帧处于不同显示模式；之后通过 `scroll-up` 小步向上滚动。
+- 向上采集顺序本身是“底部 -> 顶部”，位移匹配时交换帧方向，最终拼接前再把 frames/matches 反转回正常阅读顺序。
+- Kitty + Lazygit 向上不能进入 tmux copy-mode，否则会冻结 Lazygit 自己的视口；因此检测到 Kitty + Lazygit 后留在应用本身，通过 tmux 直接发送 `K`。
+- Kitty + Lazygit 向上路径不执行 copy-mode restore，因为它本来就没有进入 copy-mode。
+
+#### 明确禁止重新引入的失败路径
+
+以下方案已经实际证明不适合作为当前最终实现，不应再因为“统一输入”而重新加入：
+
+- `ydotool` / `ydotoold`。
+- 把当前用户加入 Linux `input` 组来满足 ScrollShot。
+- 依赖 `/dev/input/*`、uinput daemon、额外 root 权限。
+- XTest 模拟 `Ctrl+Shift+Up` 等键盘组合；此前错误实现曾在终端产生 `AAAAA`。
+- 认为 Kitty 和 Alacritty 必须走完全相同的滚轮实现。
 
 ### i3 / X11 交互
 
@@ -78,7 +120,7 @@
 
 ## 3. 用户侧运行方式
 
-### AppImage
+### 普通向下滚动截图
 
 在 **Linux X11 图形终端**执行：
 
@@ -86,21 +128,48 @@
 # 为 AppImage 添加执行权限
 chmod +x scrollshot.AppImage
 
-# 启动 ScrollShot
+# 启动普通滚动截图
 ./scrollshot.AppImage
 ```
 
-### Kando
+如果使用系统入口：
 
-Kando 只负责启动 ScrollShot，不需要额外添加通知命令。
-
-如果当前入口是 `/usr/local/bin/scrollshot`，在 **Kando 的运行程序/命令动作**中填写：
-
-```text
+```bash
+# 启动普通滚动截图
 /usr/local/bin/scrollshot
 ```
 
-该写法已经实际验证有效。不要在命令后追加 `&& notify-send ...`；通知属于 ScrollShot 保存成功后的内部行为，不应在 Kando 动作中重复实现。
+### 终端向上滚动截图
+
+在 **Linux X11 图形终端**执行：
+
+```bash
+# 从当前终端位置向上采集历史
+./scrollshot.AppImage --scroll-up
+```
+
+如果使用系统入口：
+
+```bash
+# 终端向上滚动截图
+/usr/local/bin/scrollshot --scroll-up
+```
+
+`--scroll-up` 当前按最终实测基线用于 Alacritty / Kitty + tmux 终端，不是浏览器/Dolphin/PDF 的通用反向模式。
+
+### Kando
+
+Kando 不需要额外添加通知命令。建议保留两个独立动作：
+
+```text
+# 普通滚动截图
+/usr/local/bin/scrollshot
+
+# 终端向上滚动截图
+/usr/local/bin/scrollshot --scroll-up
+```
+
+不要在命令后追加 `&& notify-send ...`；通知属于 ScrollShot 保存成功后的内部行为，不应在 Kando 动作中重复实现。
 
 ## 4. 停止行为必须保持一致
 
@@ -132,6 +201,7 @@ create_select_region
   -> create_resilient_stitcher
   -> create_seam_cleaning_stitcher
   -> create_capture_runner（安全滚轮落点 / Esc / 工作区保护 / 匹配恢复）
+  -> configure_terminal_scrolling（Alacritty / Kitty / tmux / Lazygit / --scroll-up）
   -> 保存成功后的 _notify_capture_saved
 ```
 
@@ -145,9 +215,11 @@ create_select_region
 - 删除 capture runtime 的底部宽限、重试或小步恢复。
 - 把浏览器滚轮落点改回选区正中心。
 - 绕过既有 `move_to_region()` 接口直接要求 Controller 提供新的指针移动接口。
+- 把终端滚动分流提前到核心匹配/拼接增强层之前。
+- 为了 Kitty 强行替换 Alacritty 已验证的 X11 向下路径。
+- 为了“统一”而把 Kitty + Lazygit 向上重新改成 copy-mode。
 - 将通知放到 PNG 保存之前。
 - 删除启动器通知环境清理和 session bus 重建逻辑。
-- 因为两个模块都处理 PyInstaller/宿主环境就擅自合并或删除其中一段已验证逻辑。
 
 ## 6. 模块职责
 
@@ -163,14 +235,70 @@ create_select_region
 | `src/resilient_stitch.py` | 固定侧栏、滚动条、PDF 固定边界等稳健拼接 |
 | `src/seam_cleanup.py` | 只在已知拼接点附近进行保守深色缝清理 |
 | `src/capture_runtime.py` | 捕获循环、安全滚轮落点、`Esc`/`Ctrl+C`、工作区保护、底部判定、匹配重试和小步恢复；必须保持既有 `move_to_region()` Controller 接口 |
-| `src/scrollshot_app.py` | 按稳定顺序装配所有增强层；清理启动器通知环境并在成功保存后发送桌面通知 |
+| `src/terminal_scroll.py` | 终端状态识别、Kitty/Alacritty + tmux pane 解析、Kitty copy-mode 向下、Kitty+Lazygit `J/K` 分流、`--scroll-up` copy-mode 预处理、向上匹配/拼接顺序转换与退出恢复 |
+| `src/scrollshot_app.py` | 按稳定顺序装配所有增强层；在 capture runtime 后增加终端分流；清理启动器通知环境并在成功保存后发送桌面通知 |
+| `tests/test_terminal_scroll.py` | 回归 tmux pane 分流、Kitty copy-mode、Lazygit、普通向下回退、向上预处理和恢复语义；不能替代真实 Kitty/Alacritty 交互实测 |
 | `tests/test_capture_runtime.py` | 回归捕获运行层底部宽限等行为，同时保护既有 Controller 调用接口 |
 | `tests/test_capture_workspace.py` | 回归工作区切换保护和缺失 EWMH 支持时的捕获行为，同时保护既有 Controller 调用接口 |
 | `tests/test_notification_environment.py` | 模拟 Kando/启动器错误 D-Bus 与动态库环境，回归检查 session bus 重建和环境清理 |
 | `packaging/AppRun` | AppImage 最外层启动入口；保持简单，不重复实现截图或通知逻辑 |
 | `.github/workflows/build.yml` | 静态检查、单元测试、X11 回归、AppImage 构建/自测、SHA-256 和 `latest` Release |
 
-## 7. 最终通知链路
+## 7. 终端滚动层中文维护注释
+
+这里记录 `src/terminal_scroll.py` 的逻辑含义，后续维护优先看这里，不要为了翻译源码注释而无意义重建已经实测通过的 AppImage。
+
+### `TmuxScrollBridge._terminal_pid_under_pointer()`
+
+- i3 会把应用客户端 reparent 到 frame/container window。
+- 不能只看 root 的直接 child，也不能只向 parent 方向找。
+- 当前稳定做法是沿 `query_pointer().child` 从 root 一层层向下走到最深窗口，再从深到浅检查 `WM_CLASS` 和 `_NET_WM_PID`。
+- 这是修复 i3 下 Kitty/Alacritty 识别失败的关键点。
+
+### `_client_tty_for_terminal()`
+
+- 通过 `/proc/<pid>` 子进程树收集 `/dev/pts/*`。
+- 与 `tmux list-clients` 返回的 `client_tty` 对应。
+- 如果有明确匹配，使用最近活动的匹配 client。
+- 只有一个 tmux client 时允许作为安全回退；多 client 情况不猜目标。
+
+### `_pane_state_for_pid()`
+
+- 读取 `pane_id`、`pane_mode`、`scroll_position` 和 `alternate_on`。
+- 这些状态决定到底走 copy-mode、Lazygit 应用层滚动还是原 X11 路径。
+
+### `scroll_existing_kitty_copy_mode()`
+
+- 只对 Kitty 做特殊处理。
+- copy-mode：直接执行 tmux `scroll-down`。
+- 非 copy-mode + alternate screen + `pane_current_command=lazygit`：向 Lazygit 发送 `J`。
+- 其他情况返回 `False`，让原 X11 向下滚动继续接管。
+
+### `prepare_copy_mode()`
+
+- 用于普通终端 `--scroll-up`。
+- 必须在第一帧截图之前进入 copy-mode；否则第一帧与后续帧显示模式不同，会造成匹配失败。
+
+### `scroll_copy_mode()`
+
+- 普通终端向上/向下 copy-mode 小步滚动接口。
+- `--scroll-up` 使用 `scroll-up`。
+
+### `_kitty_lazygit_state()` / `scroll_kitty_lazygit()`
+
+- 只在 Kitty + alternate screen + `pane_current_command=lazygit` 时成立。
+- 向下发送 `J`，向上发送 `K`。
+- Kitty + Lazygit 向上必须留在 Lazygit 自身，不进入 copy-mode。
+
+### `configure_terminal_scrolling()`
+
+- 普通 `scrollshot`：保持正常 capture runner，只有 Kitty 特定场景在 `scroll_down()` 时被分流。
+- `--scroll-up`：临时包装 `move_to_region`、`scroll_down`、`close`、匹配器和拼接器。
+- 普通终端先 `prepare_copy_mode()` 再拍第一帧。
+- Kitty + Lazygit 向上记录 controller ID，改走 `K`，并跳过 copy-mode restore。
+- 捕获结束后所有 monkey patch 必须在 `finally` 中恢复。
+
+## 8. 最终通知链路
 
 通知必须保持以下顺序和原则：
 
@@ -187,9 +315,9 @@ create_select_region
 
 这一链路已经实际解决“终端运行 ScrollShot 有通知，但 Kando 运行没有通知”的问题，并已完成 Kando 实测确认。
 
-## 8. 匹配失败恢复与安全滚动链路
+## 9. 匹配失败恢复与安全滚动链路
 
-正常滚动：
+正常 GUI 滚动：
 
 1. 使用原始真实选区计算安全滚轮坐标：横向约 85%、纵向约 60%。
 2. 构造 1×1 临时目标区域。
@@ -207,9 +335,9 @@ create_select_region
 6. 只有恢复帧得到可靠匹配后才加入 `frames` / `matches`。
 7. 恢复失败才结束本次捕获并保存已确认结果。
 
-该链路同时是浏览器视频页和 PDF/整窗 GUI 稳定性的关键部分，不要拆分成不同的未经验证滚动实现。
+该链路是浏览器视频页和 PDF/整窗 GUI 稳定性的关键部分，不要因为终端新增了 tmux 分流就修改 GUI 捕获恢复逻辑。
 
-## 9. GitHub Actions 与 Actions 分钟
+## 10. GitHub Actions 与 Actions 分钟
 
 当前仓库只维护 `main`，最终稳定修改直接提交到 `main`。
 
@@ -221,9 +349,7 @@ create_select_region
 - 构建通过后更新唯一的 `latest` Release。
 - 不应通过连续小提交反复触发 Actions 来试错。
 
-本轮浏览器安全滚动修改中，第一次实现 `d1119117...` 被现有单元测试正确拦截：`test_capture_runtime.py` 和 `test_capture_workspace.py` 的模拟 Controller 只实现稳定接口 `move_to_region()`。最终锚点 `0c290f292...` 恢复该接口契约，并将安全目标包装成 1×1 临时区域。
-
-当前 `latest` 标签下 `src/capture_runtime.py` 的 blob 与最终修正版一致，因此发布资产已经包含最终逻辑。之后的 README/稳定笔记整理属于 `paths-ignore`，不需要再次消耗 Actions 构建分钟。
+最终终端逻辑锚点 `016d8b...` 已在真实环境完成 8 个方向组合验证。后续纯 README/稳定笔记整理属于 `paths-ignore`，不应再次消耗 Actions 构建分钟。
 
 修改 workflow 前必须检查：
 
@@ -238,17 +364,20 @@ create_select_region
 - SHA-256 生成。
 - `latest` Release 更新逻辑。
 
-## 10. 已知边界
+## 11. 已知边界
 
 当前稳定版本仍有明确边界：
 
 - 只支持 X11，不支持原生 Wayland。
-- 滚动输入发送到选区横向约 85%、纵向约 60% 的安全位置；该位置仍必须能够把滚轮传给实际滚动容器。如果特殊控件恰好覆盖并截获该点，页面仍可能无法滚动。
+- GUI 滚动输入发送到选区横向约 85%、纵向约 60% 的安全位置；该位置仍必须能够把滚轮传给实际滚动容器。如果特殊控件恰好覆盖并截获该点，页面仍可能无法滚动。
+- 终端 `--scroll-up` 当前要求 Alacritty / Kitty 中存在可解析的活动 tmux client。
+- Kitty 普通向下的 tmux 专用路径依赖 pane 已处于 copy-mode；不满足时保留原 X11 回退。
+- Kitty + Lazygit 双向应用层分流依赖 Lazygit 默认小步滚动键 `K` / `J`。如果以后手动重映射 Lazygit，这里必须同步调整并重新回归。
 - 顶部固定/悬浮小视频通常不会在最终拼接图中被每轮大量重复追加，但持续视频、强动画、大面积闪烁、非常规覆盖层仍可能降低重叠匹配可靠性。
-- 极端特殊的网页/PDF 布局仍可能需要 `--debug-dir` 收集原始帧后再针对性分析。
+- 极端特殊的网页/PDF/终端 TUI 布局仍可能需要 `--debug-dir` 收集原始帧后再针对性分析。
 - 通知依赖宿主机 `notify-send` 和可用的 Freedesktop 通知服务；缺失时截图本身不受影响。
 
-## 11. 后续修改前检查清单
+## 12. 后续修改前检查清单
 
 任何后续代码修改前，至少检查：
 
@@ -261,6 +390,11 @@ create_select_region
 - 是否保持横向约 85%、纵向约 60% 的安全滚轮策略。
 - 是否继续通过 `move_to_region()` 与 Controller 交互，避免再次新增未经测试桩实现的接口依赖。
 - 是否正常滚动和 1 格恢复滚动都使用同一安全目标。
+- 是否完整回归 Alacritty 普通终端上下、Alacritty Lazygit 上下、Kitty 普通终端上下、Kitty Lazygit 上下，共 8 个方向组合。
+- 是否错误地把 Kitty + Lazygit 向上放进 tmux copy-mode。
+- 是否错误地删除 Kitty copy-mode `scroll-down` 分流。
+- 是否重新引入 `ydotool`、`input` 组、uinput 或 root 权限要求。
+- 是否重新引入可能产生 `AAAAA` 的模拟键盘注入。
 - 是否影响 Kando/其他启动器下的 D-Bus 通知。
 - 是否重新信任启动器继承的 `DBUS_SESSION_BUS_ADDRESS`。
 - 是否删除 `LD_LIBRARY_PATH` / `LD_LIBRARY_PATH_ORIG` / `LD_PRELOAD` 清理。
@@ -269,7 +403,7 @@ create_select_region
 - 是否修改了无关文件。
 - 是否在提交前完成完整 diff 检查。
 
-## 12. 回归时的处理原则
+## 13. 回归时的处理原则
 
 如果后续版本出现回归：
 
@@ -277,14 +411,16 @@ create_select_region
 2. 保留已经确认有效的命令、参数、模块顺序、Controller 接口和停止语义。
 3. 浏览器滚动异常先检查安全落点是否仍为约 X=85%、Y=60%，以及该点是否被网页特殊控件截获，不要先改拼接算法。
 4. PDF/重复版式问题优先检查既定匹配重试和 1 格恢复链路，不要把 `match is None` 改成直接结束。
-5. 通知问题优先运行 `tests/test_notification_environment.py` 并核对真实 session bus，不要先改截图逻辑。
-6. 一次性完成静态检查和完整 diff 后再提交。
-7. 不使用用户真实环境进行无意义的反复试错。
+5. Kitty 普通终端问题先区分当前是否处于 tmux copy-mode；不要直接安装输入模拟工具。
+6. Kitty + Lazygit 问题先核对 `pane_current_command`、`alternate_on` 和 `K/J` 绑定；不要先修改 GUI 滚轮链。
+7. 通知问题优先运行 `tests/test_notification_environment.py` 并核对真实 session bus，不要先改截图逻辑。
+8. 一次性完成静态检查和完整 diff 后再提交。
+9. 不使用用户真实环境进行无意义的反复试错。
 
-## 13. 最终结论
+## 14. 最终结论
 
-`0c290f2920818c55da5e3860310007096b0a0908` 作为当前已实际验证的运行逻辑稳定锚点保留。
+`016d8b677e49a81e129fb5139c6cbeed287525e4` 作为当前已实际验证的最终运行逻辑稳定锚点保留。
 
-该锚点已经具备：Dolphin、浏览器、YouTube 视频页、PDF/整窗 GUI、i3/EWMH、`Esc`/`Ctrl+C`、工作区保护、Kando/普通终端通知、固定侧栏/滚动条处理、匹配失败恢复，以及浏览器安全滚轮落点。`latest` Release 已包含该运行逻辑。
+该锚点已经具备：Dolphin、浏览器、YouTube 视频页、PDF/整窗 GUI、i3/EWMH、`Esc`/`Ctrl+C`、工作区保护、Kando/普通终端通知、固定侧栏/滚动条处理、匹配失败恢复、浏览器安全滚轮落点，以及 Alacritty / Kitty + tmux + Lazygit 的最终双向滚动截图分流。
 
-后续若只是 README 或维护笔记调整，应保持 `latest` AppImage 不变；只有真正需要修改代码时，才重新走完整 Actions 构建和实际回归验证。
+后续若只是 README、中文维护说明或稳定笔记调整，应保持运行代码和已实测 AppImage 不变；只有真正需要修改运行逻辑时，才重新走完整 Actions 构建和真实环境回归验证。
