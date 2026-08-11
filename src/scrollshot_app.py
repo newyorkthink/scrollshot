@@ -105,57 +105,141 @@ def _notify_capture_saved(output: Path) -> None:
         return
 
 
+def _host_input_environment() -> dict[str, str]:
+    """为宿主机输入工具清理 AppImage/PyInstaller 动态库环境。"""
+
+    environment = os.environ.copy()
+    for variable in ("LD_LIBRARY_PATH", "LD_LIBRARY_PATH_ORIG", "LD_PRELOAD"):
+        environment.pop(variable, None)
+    return environment
+
+
+def _find_ydotool(environment: dict[str, str]) -> str | None:
+    """优先使用宿主机 ydotool，避免命中 AppImage 内部路径。"""
+
+    for candidate in (
+        Path("/usr/bin/ydotool"),
+        Path("/bin/ydotool"),
+        Path("/usr/local/bin/ydotool"),
+    ):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+
+    return shutil.which("ydotool", path=environment.get("PATH"))
+
+
+def _window_classes_under_pointer(controller) -> tuple[str, ...]:
+    """读取指针下 X11 客户端及其父窗口的 WM_CLASS。"""
+
+    try:
+        pointer = controller.root.query_pointer()
+        window = getattr(pointer, "child", None)
+    except Exception:
+        return ()
+
+    classes: list[str] = []
+    visited: set[int] = set()
+    while window is not None:
+        marker = id(window)
+        if marker in visited:
+            break
+        visited.add(marker)
+
+        try:
+            wm_class = window.get_wm_class()
+        except Exception:
+            wm_class = None
+        if wm_class:
+            classes.extend(str(value).casefold() for value in wm_class if value)
+
+        if window == controller.root:
+            break
+        try:
+            window = window.query_tree().parent
+        except Exception:
+            break
+
+    return tuple(classes)
+
+
+def _is_kitty_target(controller) -> bool:
+    """仅在实际指针目标属于 Kitty 时切换到真实 uinput 滚轮。"""
+
+    return any("kitty" in value for value in _window_classes_under_pointer(controller))
+
+
+def _ydotool_wheel(ticks: int, *, upward: bool) -> None:
+    """通过宿主机 ydotoold/uinput 发送真实纵向滚轮事件。"""
+
+    ticks = max(1, int(ticks))
+    environment = _host_input_environment()
+    ydotool = _find_ydotool(environment)
+    if ydotool is None:
+        raise core.CaptureError(
+            "Kitty scrolling requires host ydotool and a running ydotoold"
+        )
+
+    # Linux REL_WHEEL：正值向上，负值向下。
+    delta = ticks if upward else -ticks
+    try:
+        result = subprocess.run(
+            [
+                ydotool,
+                "mousemove",
+                "--wheel",
+                "-x",
+                "0",
+                "-y",
+                str(delta),
+            ],
+            check=False,
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=3.0,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise core.CaptureError(
+            "Kitty scrolling requires a running ydotoold with /dev/uinput access"
+        ) from exc
+
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip()
+        message = "Kitty scrolling requires a running ydotoold with /dev/uinput access"
+        if detail:
+            message = f"{message}: {detail}"
+        raise core.CaptureError(message)
+
+
 def _scroll_up(controller, ticks: int) -> None:
-    """通过 Kitty 默认 Ctrl+Shift+Up 逐行向上浏览终端历史。"""
+    """终端向上模式：Kitty 用 uinput；其他 X11 目标继续使用 Button 4。"""
 
-    # 普通 X11 Button 4 在 Kitty 终端历史中可能不会触发实际 scrollback。
-    # 终端模式改用 Kitty 官方默认的逐行向上快捷键；每个 tick 只移动一行，
-    # 保持足够重叠供现有匹配/拼接链继续使用，不改变普通滚动截图逻辑。
-    keysyms = (
-        0xFFE3,  # Control_L
-        0xFFE1,  # Shift_L
-        0xFF52,  # Up
-    )
-    keycodes = tuple(
-        controller.display.keysym_to_keycode(keysym)
-        for keysym in keysyms
-    )
-    if not all(keycodes):
-        raise core.CaptureError("X11 did not provide terminal scroll keycodes")
+    if _is_kitty_target(controller):
+        _ydotool_wheel(ticks, upward=True)
+        return
 
-    control_keycode, shift_keycode, up_keycode = keycodes
+    # 保留 Alacritty 等现有 X11 终端可接受的传统 Button 4 路径。
     for _ in range(ticks):
-        controller.xtest.fake_input(
-            controller.display,
-            controller.X.KeyPress,
-            control_keycode,
-        )
-        controller.xtest.fake_input(
-            controller.display,
-            controller.X.KeyPress,
-            shift_keycode,
-        )
-        controller.xtest.fake_input(
-            controller.display,
-            controller.X.KeyPress,
-            up_keycode,
-        )
-        controller.xtest.fake_input(
-            controller.display,
-            controller.X.KeyRelease,
-            up_keycode,
-        )
-        controller.xtest.fake_input(
-            controller.display,
-            controller.X.KeyRelease,
-            shift_keycode,
-        )
-        controller.xtest.fake_input(
-            controller.display,
-            controller.X.KeyRelease,
-            control_keycode,
-        )
+        controller.xtest.fake_input(controller.display, controller.X.ButtonPress, 4)
+        controller.xtest.fake_input(controller.display, controller.X.ButtonRelease, 4)
     controller.display.sync()
+
+
+# 普通向下滚动保持现有已验证实现；仅 Kitty 目标切换到真实 uinput 滚轮。
+_core_scroll_down = core.X11Controller.scroll_down
+
+
+def _scroll_down(controller, ticks: int) -> None:
+    """Kitty 使用 uinput 向下滚动，其他窗口逐字保留既有 scroll_down 行为。"""
+
+    if _is_kitty_target(controller):
+        _ydotool_wheel(ticks, upward=False)
+        return
+    _core_scroll_down(controller, ticks)
+
+
+core.X11Controller.scroll_down = _scroll_down
 
 
 # 终端历史截图是独立的附加模式；默认向下滚动参数和行为保持不变。
