@@ -22,6 +22,67 @@ class BridgeTests(unittest.TestCase):
             core, tmux_executable="/usr/bin/tmux"
         )
 
+    def test_kitty_existing_copy_mode_scrolls_down_through_tmux(self):
+        bridge = self.make_bridge()
+        controller = object()
+        state = terminal_scroll._PaneState(
+            pane_id="%4",
+            pane_mode="copy-mode",
+            original_scroll_position=45,
+            alternate_on=False,
+        )
+        calls = []
+        with mock.patch.object(
+            bridge,
+            "_terminal_pid_under_pointer",
+            return_value=1234,
+        ) as pid_lookup, mock.patch.object(
+            bridge,
+            "_pane_state_for_pid",
+            return_value=state,
+        ), mock.patch.object(
+            bridge,
+            "_run",
+            side_effect=lambda *args, **kwargs: calls.append((args, kwargs)) or "",
+        ):
+            self.assertTrue(
+                bridge.scroll_existing_kitty_copy_mode(controller, 3)
+            )
+
+        pid_lookup.assert_called_once_with(
+            controller, terminal_scroll.KITTY_CLASS_MARKERS
+        )
+        self.assertEqual(
+            calls[0][0],
+            ("send-keys", "-t", "%4", "-X", "-N", "3", "scroll-down"),
+        )
+
+    def test_kitty_without_copy_mode_falls_back(self):
+        bridge = self.make_bridge()
+        controller = object()
+        state = terminal_scroll._PaneState(
+            pane_id="%4",
+            pane_mode="",
+            original_scroll_position=None,
+            alternate_on=False,
+        )
+        with mock.patch.object(
+            bridge,
+            "_terminal_pid_under_pointer",
+            return_value=1234,
+        ), mock.patch.object(
+            bridge,
+            "_pane_state_for_pid",
+            return_value=state,
+        ), mock.patch.object(
+            bridge,
+            "_run",
+        ) as run:
+            self.assertFalse(
+                bridge.scroll_existing_kitty_copy_mode(controller, 3)
+            )
+        run.assert_not_called()
+
     def test_prepare_copy_mode_before_scroll(self):
         bridge = self.make_bridge()
         controller = object()
@@ -147,7 +208,7 @@ class ConfigureTests(unittest.TestCase):
             ),
         )
 
-    def test_normal_capture_keeps_original_down_path_and_never_uses_bridge(self):
+    def test_normal_alacritty_or_gui_capture_keeps_original_down_path(self):
         events = []
         core = self.make_core(events)
 
@@ -162,12 +223,8 @@ class ConfigureTests(unittest.TestCase):
 
         with mock.patch.object(
             terminal_scroll.TmuxScrollBridge,
-            "prepare_copy_mode",
-            side_effect=AssertionError("normal capture must not touch tmux"),
-        ), mock.patch.object(
-            terminal_scroll.TmuxScrollBridge,
-            "scroll_copy_mode",
-            side_effect=AssertionError("normal capture must not touch tmux"),
+            "scroll_existing_kitty_copy_mode",
+            return_value=False,
         ):
             wrapped = terminal_scroll.configure_terminal_scrolling(
                 core, capture_runner
@@ -178,6 +235,41 @@ class ConfigureTests(unittest.TestCase):
         self.assertEqual(
             events,
             [("move", "region"), ("original-down", 3), ("original-close", 0)],
+        )
+
+    def test_normal_kitty_copy_mode_uses_tmux_and_skips_x11_wheel(self):
+        events = []
+        core = self.make_core(events)
+
+        def capture_runner(_args):
+            controller = core.X11Controller()
+            try:
+                controller.move_to_region("region")
+                controller.scroll_down(3)
+                return "ok"
+            finally:
+                controller.close()
+
+        with mock.patch.object(
+            terminal_scroll.TmuxScrollBridge,
+            "scroll_existing_kitty_copy_mode",
+            side_effect=lambda _controller, ticks: (
+                events.append(("kitty-copy-down", ticks)) or True
+            ),
+        ):
+            wrapped = terminal_scroll.configure_terminal_scrolling(
+                core, capture_runner
+            )
+            args = core.build_parser().parse_args([])
+            self.assertEqual(wrapped(args), "ok")
+
+        self.assertEqual(
+            events,
+            [
+                ("move", "region"),
+                ("kitty-copy-down", 3),
+                ("original-close", 0),
+            ],
         )
 
     def test_scroll_up_prepares_before_first_capture_and_reverses_match(self):
@@ -210,6 +302,10 @@ class ConfigureTests(unittest.TestCase):
             terminal_scroll.TmuxScrollBridge,
             "restore",
             side_effect=lambda _controller: events.append(("restore", 0)),
+        ), mock.patch.object(
+            terminal_scroll.TmuxScrollBridge,
+            "scroll_existing_kitty_copy_mode",
+            return_value=False,
         ):
             wrapped = terminal_scroll.configure_terminal_scrolling(
                 core, capture_runner

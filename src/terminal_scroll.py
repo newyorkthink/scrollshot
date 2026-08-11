@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Terminal upward capture for ScrollShot through an already-running tmux client.
+"""Terminal scrolling helpers for ScrollShot through an already-running tmux client.
 
-The normal downward capture path is deliberately left untouched. Upward
-terminal capture enters tmux copy mode before the first frame is captured, so
-all frames use the same visual mode and the stable matcher sees only scrolling.
+Alacritty and ordinary GUI downward capture keep the validated X11 path.
+Kitty is only routed through tmux when the selected pane is already in tmux
+copy mode; this avoids Kitty's ignored synthetic X11 wheel while preserving
+small-step overlap for stitching. Upward terminal capture prepares copy mode
+before the first frame is captured.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from types import ModuleType
 from typing import Callable
 
 TERMINAL_CLASS_MARKERS = ("kitty", "alacritty")
+KITTY_CLASS_MARKERS = ("kitty",)
 SYSTEM_TMUX_PATHS = (
     Path("/usr/bin/tmux"),
     Path("/bin/tmux"),
@@ -85,15 +88,22 @@ class TmuxScrollBridge:
         return completed.stdout
 
     @staticmethod
-    def _is_terminal_class(values: tuple[str, ...]) -> bool:
+    def _is_terminal_class(
+        values: tuple[str, ...],
+        markers: tuple[str, ...] = TERMINAL_CLASS_MARKERS,
+    ) -> bool:
         return any(
             marker in value.casefold()
             for value in values
-            for marker in TERMINAL_CLASS_MARKERS
+            for marker in markers
         )
 
-    def _terminal_pid_under_pointer(self, controller) -> int | None:
-        """Find the deepest Kitty/Alacritty client below the pointer.
+    def _terminal_pid_under_pointer(
+        self,
+        controller,
+        markers: tuple[str, ...] = TERMINAL_CLASS_MARKERS,
+    ) -> int | None:
+        """Find the deepest requested terminal client below the pointer.
 
         i3 reparents clients into frame windows, so descend through the window
         below the pointer before inspecting WM_CLASS and _NET_WM_PID.
@@ -132,7 +142,7 @@ class TmuxScrollBridge:
             except Exception:
                 wm_class = ()
             classes = tuple(str(value) for value in wm_class if value)
-            if not classes or not self._is_terminal_class(classes):
+            if not classes or not self._is_terminal_class(classes, markers):
                 continue
 
             try:
@@ -208,10 +218,7 @@ class TmuxScrollBridge:
             return clients[0][0]
         return None
 
-    def _resolve_pane(self, controller) -> _PaneState | None:
-        terminal_pid = self._terminal_pid_under_pointer(controller)
-        if terminal_pid is None:
-            return None
+    def _pane_state_for_pid(self, terminal_pid: int) -> _PaneState | None:
         client_tty = self._client_tty_for_terminal(terminal_pid)
         if client_tty is None:
             return None
@@ -243,6 +250,12 @@ class TmuxScrollBridge:
             alternate_on=alternate_text == "1",
         )
 
+    def _resolve_pane(self, controller) -> _PaneState | None:
+        terminal_pid = self._terminal_pid_under_pointer(controller)
+        if terminal_pid is None:
+            return None
+        return self._pane_state_for_pid(terminal_pid)
+
     def _state_for(self, controller) -> _PaneState | None:
         key = id(controller)
         state = self._states.get(key)
@@ -251,6 +264,29 @@ class TmuxScrollBridge:
             if state is not None:
                 self._states[key] = state
         return state
+
+    def scroll_existing_kitty_copy_mode(self, controller, ticks: int) -> bool:
+        """Scroll down only when the pointer is on Kitty already in tmux copy mode."""
+
+        terminal_pid = self._terminal_pid_under_pointer(
+            controller, KITTY_CLASS_MARKERS
+        )
+        if terminal_pid is None:
+            return False
+        state = self._pane_state_for_pid(terminal_pid)
+        if state is None or state.pane_mode != "copy-mode":
+            return False
+
+        self._run(
+            "send-keys",
+            "-t",
+            state.pane_id,
+            "-X",
+            "-N",
+            str(max(1, int(ticks))),
+            "scroll-down",
+        )
+        return True
 
     def prepare_copy_mode(self, controller) -> bool:
         """Enter copy mode without scrolling, before the first capture frame."""
@@ -332,10 +368,11 @@ def configure_terminal_scrolling(
     core: ModuleType,
     capture_runner: Callable,
 ) -> Callable:
-    """Add --scroll-up without changing the validated normal down-scroll path."""
+    """Keep stable down capture, adding Kitty copy-mode and --scroll-up bridges."""
 
     bridge = TmuxScrollBridge(core)
     original_build_parser = core.build_parser
+    original_scroll_down = core.X11Controller.scroll_down
     stable_estimator = core.estimate_vertical_shift
     stable_stitcher = core.stitch_frames
 
@@ -348,10 +385,17 @@ def configure_terminal_scrolling(
         )
         return parser
 
+    def terminal_aware_scroll_down(controller, ticks: int) -> None:
+        # Alacritty and normal GUI remain on the validated X11 path.
+        # Kitty is intercepted only if tmux copy mode is already active.
+        if bridge.scroll_existing_kitty_copy_mode(controller, ticks):
+            return
+        original_scroll_down(controller, ticks)
+
     core.build_parser = build_parser_with_scroll_up
+    core.X11Controller.scroll_down = terminal_aware_scroll_down
 
     def run_capture(args):
-        # 普通向下截图严格保留既有稳定路径，不再让 tmux 接管。
         if not bool(getattr(args, "scroll_up", False)):
             return capture_runner(args)
 
